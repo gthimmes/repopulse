@@ -1,0 +1,25 @@
+.DS_Store
+
+# Node — Playwright harness only
+node_modules/
+
+# Go
+tools/go/
+bin/
+mood-ring.exe
+mood-ring
+fixture-gen.exe
+fixture-gen
+*.test
+
+# E2E test output
+test-results/
+playwright-report/
+tests/screenshots/*.png
+tests/screenshots/*.html
+!tests/screenshots/.gitkeep
+
+# All generated reports live under output/ by default (auto-mkdir).
+# Ignore everything inside output/ except the .gitkeep that preserves the directory.
+output/*
+!output/.gitkeep

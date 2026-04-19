@@ -1,0 +1,12 @@
+{
+  "name": "mood-ring-e2e",
+  "version": "0.1.0",
+  "description": "Playwright end-to-end harness for mood-ring. The product itself is 100% Go — see cmd/mood-ring and internal/. This file exists only because Playwright is a Node-ecosystem tool.",
+  "private": true,
+  "scripts": {
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1"
+  }
+}
