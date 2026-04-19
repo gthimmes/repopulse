@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"repopulse/internal/baseline"
 	"repopulse/internal/codeowners"
 	"repopulse/internal/compare"
 	"repopulse/internal/config"
@@ -23,6 +24,7 @@ import (
 	"repopulse/internal/scorer"
 	"repopulse/internal/signals"
 	"repopulse/internal/snapshots"
+	"repopulse/internal/standards"
 	"repopulse/internal/types"
 )
 
@@ -151,6 +153,36 @@ func run(repoPathRaw string, opts types.CliOptions) error {
 	})
 	rolling := narrative.ComputeRollingTimeline(commits, windowStart, windowEnd, bugOpts)
 
+	// Plank 1 — per-author baseline drift. Pull a baseline window
+	// 6× the current window, ending where the current window starts,
+	// so each contributor is compared against their own prior pattern.
+	baselineDays := effectiveWindowDays * 6
+	baselineSince := windowStart.AddDate(0, 0, -baselineDays).UTC().Format(time.RFC3339)
+	baselineUntil := windowStart.UTC().Format(time.RFC3339)
+	baselineCommits, err := git.CollectCommits(git.CollectorOptions{
+		RepoPath: repoPath,
+		Since:    baselineSince,
+		Until:    baselineUntil,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: baseline window fetch failed: %v\n", err)
+	}
+	authorDrift := baseline.ComputeAuthorDrift(commits, baselineCommits, baseline.Options{
+		CurrentDays:  effectiveWindowDays,
+		BaselineDays: baselineDays,
+		BugOptions:   bugOpts,
+	})
+
+	// Plank 2 — deterministic standards. Conventional-commit compliance
+	// is computed over the current window's commits; test-file colocation
+	// over the full HEAD file set so the result reflects the whole repo,
+	// not just files changed in the window.
+	allFiles, err := git.ListFiles(repoPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not list files for colocation analysis: %v\n", err)
+	}
+	standardsSig := standards.Compute(commits, allFiles)
+
 	base := scorer.ComputeMood(scorer.Input{
 		CommitFrequency: freq,
 		FileChurn:       churn,
@@ -161,6 +193,8 @@ func run(repoPathRaw string, opts types.CliOptions) error {
 		Authors:         authors,
 		RollingTimeline: rolling,
 	})
+	base.Signals.AuthorDrift = authorDrift
+	base.Signals.Standards = standardsSig
 	meta := types.RepoMeta{
 		RepoName:          filepath.Base(repoPath),
 		RepoPath:          repoPath,

@@ -35,6 +35,7 @@ type CollectorOptions struct {
 	RepoPath   string
 	Since      string // ISO date or relative string (e.g. "3 months ago")
 	WindowDays int    // used if Since is empty
+	Until      string // optional ISO date upper bound; powers baseline-window queries
 }
 
 // CollectCommits runs `git log --numstat` in the window and returns parsed records, newest first.
@@ -51,14 +52,18 @@ func CollectCommits(opts CollectorOptions) ([]types.CommitRecord, error) {
 		sinceStr = time.Now().AddDate(0, 0, -days).UTC().Format(time.RFC3339)
 	}
 
-	cmd := exec.Command("git",
+	args := []string{
 		"-C", opts.RepoPath,
 		"log",
 		"--numstat",
-		"--format="+GitFormat,
-		"--since="+sinceStr,
+		"--format=" + GitFormat,
+		"--since=" + sinceStr,
 		"--no-merges",
-	)
+	}
+	if opts.Until != "" {
+		args = append(args, "--until="+opts.Until)
+	}
+	cmd := exec.Command("git", args...)
 	out, err := cmd.Output()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
@@ -95,6 +100,22 @@ func GetPreWindowAuthorEmails(repoPath string, before time.Time) (map[string]str
 		}
 	}
 	return set, nil
+}
+
+// ListFiles returns every file tracked at HEAD via `git ls-files`. Used
+// by the standards signals (test-file colocation) to walk the working
+// tree without falling back to OS-level globbing.
+func ListFiles(repoPath string) ([]string, error) {
+	cmd := exec.Command("git", "-C", repoPath, "ls-files")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git ls-files failed: %w", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
+	if len(lines) == 1 && lines[0] == "" {
+		return nil, nil
+	}
+	return lines, nil
 }
 
 // GetFileLineCount returns the current line count for a file at HEAD.

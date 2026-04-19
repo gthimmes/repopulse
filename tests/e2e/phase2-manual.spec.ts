@@ -45,6 +45,34 @@ test.describe('Phase 2 — manual real-data verification', () => {
     }
   });
 
+  test('plank 2 — Standards card shows compliance + colocation', async ({ page }) => {
+    await page.goto('file://' + reportPath);
+    const card = page.locator('.card').filter({ hasText: 'Standards' }).first();
+    await expect(card).toContainText('Conventional commits');
+    await expect(card).toContainText('Test-file colocation');
+    // Expect at least one per-author bar and one module bar
+    const bars = card.locator('.std-author-bar');
+    expect(await bars.count(), 'expected per-author/module bars').toBeGreaterThan(0);
+    await card.scrollIntoViewIfNeeded();
+    await card.screenshot({ path: path.resolve(__dirname, '../../output/plank2-standards.png') });
+  });
+
+  test('plank 1 — "Worth a 1:1" drift cards render on real data', async ({ page }) => {
+    await page.goto('file://' + reportPath);
+    const card = page.locator('.card').filter({ hasText: 'Worth a 1:1' }).first();
+    await expect(card).toContainText(/per-author drift vs \d+-day baseline/);
+
+    // On anduinrepo we expect multiple flagged authors; assert at least one drift card exists
+    const driftCards = page.locator('.drift-card');
+    expect(await driftCards.count(), 'expected at least one drift card on real data').toBeGreaterThan(0);
+
+    // At least one of the known flag kinds should appear
+    await expect(card.locator('.drift-pill').first()).toBeVisible();
+
+    await card.scrollIntoViewIfNeeded();
+    await card.screenshot({ path: path.resolve(__dirname, '../../output/plank1-drift.png') });
+  });
+
   test('trend chart canvas is present and legend shows all 6 series', async ({ page }) => {
     const errs: string[] = [];
     page.on('pageerror', (e) => errs.push(e.message));

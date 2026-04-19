@@ -1,162 +1,136 @@
 # repopulse roadmap
 
+## Direction
+
+**repopulse is a lens, not a scorecard.** You open it when you want to understand what's going on in a codebase or with the people contributing to it — not because a dashboard told you to. Two lenses, equally weighted:
+
+- **Codebase health** — what's on fire, what's drifting, where are the standards we said we'd hold, are we actually holding them?
+- **Contributor health** — is someone's load shifting in a way worth a 1:1? Are patterns emerging that point to struggle, burnout, or a gap we can coach on?
+
+Both lenses emit **things to look at**, not scores to rank against. The mood badge and composite score remain (they're useful at-a-glance), but the forward-looking work is about making the report *explorable* and the signals *personal without being performative*.
+
+---
+
 ## Current state
 
 - ✅ **Phase 1 complete** (1.1–1.5): hotspot drill-downs, bug explainability, CODEOWNERS team tags, hotspot recommendations, markdown digest export.
-- ✅ **Go port complete**: codebase is 100% Go. TypeScript fully removed. The fixture generator for Playwright now lives at `cmd/fixture-gen/main.go` with data in `internal/fixtures/ui.go`.
-- ✅ **Phase 2 partial**: 2.1 (snapshot store) + 2.2 (trend charts) shipped. Each run auto-writes a JSON snapshot under `<repo>/.repopulse/snapshots/` (rolling 365-entry cap, gitignore auto-created), and the HTML report includes a multi-series trend chart of the composite + per-signal scores across snapshots. Toggle via `-no-snapshot`.
-- ⏳ **Phase 2 remaining**: 2.3 (GitHub Action) + 2.4 (threshold alerts). Both need CI to validate end-to-end so they're sequenced after the local-artifact items.
-- ⏳ **Go port polish remaining** (task #19): parallelize `git show HEAD:<path>` calls (currently 100 sequential subprocess invocations make Go noticeably slower than it should be — clear parallelization opportunity); investigate a 1-commit off-by-one observed vs the prior TS implementation on a real-data run.
-- 📋 **Mood-badge redesign deferred** (task #18): emoji badge replaced with a score-ring or mission-control readout.
+- ✅ **Go port complete**: codebase is 100% Go. Single 4 MB binary, `git` as the only runtime dep.
+- ✅ **Snapshot store + trend chart shipped** (was "Phase 2.1 + 2.2"). Every run writes `<repo>/.repopulse/snapshots/<ts>.json`; the HTML report carries a multi-series trend line.
+- ✅ **UX polish shipped** this cycle: header shows date range + "0 = calm / 100 = chaotic / lower is better," bug-tier explainer legend, conventional-commit prefix veto (`feat:`/`chore:`/etc. never classify as bugs), `.repopulserc` now appends keywords to defaults instead of replacing, full rebrand `mood-ring → repopulse`.
+- ✅ **Plank 1 shipped** this cycle: per-author baseline drift. Each contributor compared against their own rolling 6×-window baseline on commit cadence, weekend/night %, and fix-vs-feature mix. Flagged deltas surface in a "Worth a 1:1" card with alert/watch/info severity. No cross-author ranking anywhere. See `internal/baseline/`.
+- ✅ **Plank 2 shipped** this cycle (deterministic layer): conventional-commit compliance + test-file colocation. Standards card sits between Trends and Stats Row, two sub-sections each with overall %, per-author or per-module breakdowns, and drill-downs for samples. Languages auto-detected from HEAD's tracked files. AI enrichment layer for plank 2 still pending. See `internal/standards/`.
+- 📋 **Mood-badge redesign deferred**: emoji → score-ring. UI-only, low priority.
+- ⏳ **Go port polish deferred**: parallelize `git show HEAD:<path>`, investigate 1-commit off-by-one.
 
-**Test coverage:** 96 Go unit tests + 29 Playwright e2e = **125 green, 0 failures.**
-
-The only Node footprint that remains is `@playwright/test` — Playwright is the industry-standard browser automation tool and its specs are test infra, not product code. That's explicitly scoped and intentional.
-
----
-
-## North star
-
-Today the tool is a "check engine light" for a repo: a score, a narrative, some charts. To become load-bearing, it needs to serve three user lenses that the current report only partially touches:
-
-- **Engineer**: "Is the file I'm about to touch on fire? What do I do about it?"
-- **Eng leader**: "Is my org trending up or down? Where do I invest? Who's burning out?"
-- **PM**: "Can I ship this feature area? Show me the risk."
-
-The north star is moving from *interesting snapshot* to *daily signal in the systems where work already happens* (PRs, tickets, Slack, CI), validated against real incidents, sliced by team.
+**Test coverage:** 117 Go unit tests + 31 Playwright e2e = **148 green, 0 failures.**
 
 ---
 
-## Language migration (done)
+## The three planks (active direction)
 
-We ported the codebase from TypeScript to Go at the Phase 1 → Phase 2 boundary. Rationale:
+Forward work reorganizes around three planks. Each plank is a product capability, not a sprint.
 
-- Phase 2's GitHub Action wants a single static binary — Go's natural strength, Node's weakness.
-- Phase 4's portfolio aggregator needs real parallelism across repos; Node's async-only model is awkward here.
-- Distribution to a multi-stack audience (not just JS shops) is one `go install` / single-binary download, no runtime hell.
-- TypeScript's "strong typing" is compile-time only — the runtime fragility we had (Chart.js function strings, stringly-typed commander options) would not have survived Phase 2's complexity.
+### Plank 1 — Baseline-drift detection ("is someone struggling?")
 
-**Result**: a 4 MB static binary at `./repopulse.exe` (or `./repopulse` on unix). Application code lives under `cmd/repopulse/` and `internal/`. A second 3 MB test-only binary `fixture-gen` at `cmd/fixture-gen/` backs the Playwright UI fixtures. The TS application code is gone.
+Per-contributor signals compared against **that contributor's own rolling baseline**, not against a team average or a leaderboard. The output isn't "Alex commits less than median" — it's "Alex's weekend/night commits doubled vs their 6-month baseline and their fix-vs-feature ratio shifted 20 pp toward fix; worth a 1:1."
 
----
+What we compute per author:
 
-## How to read the time estimates
+- **Commit cadence drift** — commits/week now vs over the baseline.
+- **Weekend/night drift** — fraction of their commits outside business hours.
+- **Fix-vs-feature drift** — classified bug-tier commits / total for this author.
+- **Self-revert rate** *(future)* — how often their own commits got reverted.
+- **PR cycle-time drift** *(future, needs PR metadata plank)* — time-to-review, time-to-merge on their PRs.
+- **Review latency drift** *(future, needs PR metadata)* — how fast they respond to review requests.
 
-Each phase has an effort estimate expressed in **engineer-weeks** — roughly how long a single engineer working full-time on the tool would take to ship the phase. It is **not** calendar time and **not** a prediction of how long Claude will take in a session.
+Flagging rule: deltas are surfaced as **"Worth a 1:1"** cards only when the relative change is meaningful **and** the absolute numbers aren't noise (e.g., 100% increase on 1 commit/week doesn't fire). Framing in the UI is about things to discuss, not scores to act on.
 
-- A "1 engineer-week" item ≈ one solid session of focused work, or a day or two of context-switched work.
-- Claude working end-to-end on a well-specified item typically compresses these significantly.
+Privacy: no cross-author ranking surface anywhere. The cards are anchored by author name/email from git, full stop — just like the existing authors panel.
 
-Use the estimates to compare phases against each other, not as deadlines.
+### Plank 2 — Standards detection (deterministic core, AI enrichment optional)
 
----
+Is the codebase following the standards we said we'd hold?
 
-## Phase 1 — Make the report load-bearing ✅
+**Layer A — deterministic** (no AI, runs always):
+- Commit message format (conventional-commits, subject length, body presence).
+- PR description presence & length *(needs PR metadata)*.
+- Test-file colocation (`foo.ts` ↔ `foo.test.ts` or similar, configurable).
+- Branch naming convention.
+- File-size limits (flag > N lines / > N bytes).
+- Lint-config presence & enforcement (delegate to the repo's existing linter; just surface violation trends).
+- New-code-without-tests ratio.
 
-Shipped. Summary of what landed (TS first, then ported to Go):
+**Layer B — AI-augmented** (opt-in, gated on API key OR Claude Code skill):
+- Does this PR/diff follow the team's established patterns in neighboring files?
+- Are new abstractions being introduced when existing ones would work?
+- Are error-handling / logging / naming conventions consistent with the rest of the file/module?
 
-- **1.1 Hotspot drill-downs**: `<details>`-based expandable rows showing churn rank, top 3 authors, recent bug-tier commits with tier tags.
-- **1.2 Bug explainability**: collapsible "Why this score?" panel with per-tier samples + inline keyword highlighting.
-- **1.3 Recommendations**: 7-rule heuristic engine (bus-factor, chaos-repeat, rewritten, unowned, multi-owner, stale-buggy, bug-heavy) rendered under each hotspot.
-- **1.4 CODEOWNERS**: parser + path matcher with GitHub's last-match-wins semantics. Team chips on hotspots + modules.
-- **1.5 Markdown export**: `--markdown <file>` writes a Slack/PR-ready digest.
+Skill mode is uniquely good here — Claude already has the surrounding code in context, so we don't have to ship a huge diff over an API.
 
----
+### Plank 3 — Exploration over scorecard
 
-## Phase 2 — Continuous signal, not ad-hoc (~2–4 engineer-weeks)
+The current report is a read-once artifact. Move toward: open it, follow a thread, drill into what's interesting.
 
-The snapshot model caps usefulness. Turn the tool into a time series in the systems engineers already watch. **Built in Go.**
-
-### 2.1 Snapshot store ✅
-Implemented in `internal/snapshots/`. Each run writes `<repoPath>/.repopulse/snapshots/<YYYY-MM-DDTHHMMSSZ>.json` (with `-N` suffix on same-second collisions), keeps the most recent 365, and auto-creates `.repopulse/.gitignore` (`*`) so the user doesn't need to remember. The explicit `-json <path>` flag and `-compare <path>` flag still work independently of the store. Opt-out via `-no-snapshot`.
-
-### 2.2 Trend charts ✅
-Implemented in `internal/render/trends.go`. The HTML report now carries a `Score Trend Across Snapshots` section just below the Findings card with one Chart.js line per signal (composite shown by default, the five per-signal series legend-toggleable). Empty-state copy renders when there's only one snapshot. Annotations (releases, big merges) deferred — landing them needs a tagging mechanism that doesn't exist yet.
-
-### 2.3 GitHub Action
-Runs on every PR, posts a comment: *"this PR touches `src/payments/ledger.ts` (hotspot #2, 14 bug commits in 90d) — consider an extra reviewer."* Configurable thresholds.
-
-**Why this is the single highest-leverage Phase 2 item**: it's the only thing on the roadmap that puts the tool in front of every engineer on every PR. A health tool that isn't seen daily doesn't change behavior.
-
-### 2.4 Threshold alerts
-`repopulse.yml` declares max scores per signal; CI fails or posts to Slack when crossed. Optional, opt-in.
+- Query CLI (`repopulse ask "PRs Alex reviewed in <60s last quarter"`), *eventually* natural-language powered by the skill.
+- Deeper HTML drill-downs — filter authors, filter by module, filter by time range inside the same report.
+- "Trace" mode — click a hotspot, see every commit touching it in the window, with author, tier, and linked PR.
+- Personal-mirror view — engineer runs `repopulse --me me@example.com` and sees only their own drift signals, same data the coaching view would show their lead.
 
 ---
 
-## Phase 3 — Connect to where work actually happens (~1–2 engineer-months)
+## Architecture shift to support the three planks
 
-Git-only signals are a proxy. Real work lives in PRs and tickets. This is also where the weakest signal (commit-message regex) gets replaced with ground truth.
+To make plank 2 work in both no-AI and AI-enriched modes, split the pipeline into three phases:
 
-### 3.1 GitHub PR metadata
-Time-to-first-review, merge latency, reopen rate, stale-PR count, rubber-stamp detection (approved in <60s with no comments).
+1. **Collect** — git + config → `deterministic.json` (what we have today, just named).
+2. **Enrich** — optional: `deterministic.json` → `enriched.json` with AI-added narrative bullets, standards-adherence verdicts, drift interpretations. Gated on `ANTHROPIC_API_KEY` env or a Claude Code skill invocation.
+3. **Render** — `deterministic.json` (+ optional `enriched.json`) → HTML / Markdown.
 
-### 3.2 Issue tracker overlay (GitHub Issues / Jira / Linear)
-Count actual bug tickets closed per module. Calibrate the commit-regex bug signal against labeled bugs. **Replace the 30% bugRatio weight with a validated signal.**
+Add a `-from-json` CLI entry point so the binary can render an externally-enriched snapshot, enabling:
+- **Mode A** (no AI): run normally.
+- **Mode B** (API key): same run, but the enrich phase calls Claude.
+- **Mode C** (Claude Code skill): a markdown skill that runs collect → lets Claude analyze → runs render. No API key needed because Claude is already there.
 
-### 3.3 Optional incident feeds
-Sentry, PagerDuty, or Datadog incident counts per module. "This hotspot caused 3 pages last quarter" is a different sentence than "this file churns a lot."
-
-### 3.4 Test-to-code growth ratio
-Is test code keeping up with app code, not just coverage %. Coverage % can stay flat while a codebase accretes untested complexity.
-
----
-
-## Phase 4 — Portfolio + team view (~2–3 engineer-months)
-
-Eng leaders with 10+ services don't want 10 HTML files.
-
-### 4.1 Multi-repo aggregator
-One dashboard, each repo a tile, drill into any one.
-
-### 4.2 Team rollups
-Via CODEOWNERS (from Phase 1.4): weekend/night %, bus factor, hotspot count per team. **Privacy defaults**: no individual call-outs by default; personal views are opt-in only.
-
-### 4.3 Benchmarks
-Cohort percentiles: "your bug ratio is p80 vs similar-size TS monorepos." Requires a dataset; can start with a hand-curated list of public OSS repos.
-
-### 4.4 Goal setting
-Declare quarterly targets per signal, track progress, surface drift in the report.
+This refactor is cheap (mostly moving already-structured code) and unblocks plank 2's AI layer without making the core path depend on AI.
 
 ---
 
-## Phase 5 — Deeper / exploratory (later, validate before committing)
+## Immediate next item
 
-Only pursue these if Phases 1–3 got traction. Each one is a research bet, not a feature with obvious ROI.
+**Plank 1 — baseline-drift detection.** Chosen first because:
 
-### 5.1 Complexity integration
-Pipe in `eslintcc` / `lizard`: a 2000-LOC file with cyclomatic 40 is a very different hotspot than a 100-LOC config.
-
-### 5.2 Dependency-graph health
-Circular deps, longest import chain, layer-violation growth.
-
-### 5.3 Per-author personal view
-Opt-in, privacy-first. Personal weekend/night trend visible only to that engineer.
-
-### 5.4 Incident correlation study
-The key validation experiment: does the composite score predict incidents N weeks out? If yes, the tool is indispensable. If no, we're building vibes and should rescope.
+- It uses data we already collect (git commits — no new integrations needed).
+- It delivers the "is someone struggling?" signal you explicitly asked for.
+- It proves the lens-vs-scorecard thesis before we invest in AI plumbing for plank 2.
+- The snapshot store we just built is well-suited to powering it (historical baselines).
 
 ---
 
-## Immediate next items (pick one to resume)
+## Parking lot (former roadmap items, still relevant but not active)
 
-From the active task list:
+These were the pre-pivot Phase 2.3+ items. They're not dead — several fold naturally into the planks — but they're no longer the ordering constraint.
 
-1. **Phase 2.3 (GitHub Action)** — single highest-leverage item on the roadmap. With 2.1 + 2.2 in place, every PR comment can already point to a fresh snapshot's hotspot list. Needs a workflow YAML, the Action itself (probably a thin shell over the binary), and a PR-comment formatter that reuses `internal/render/markdown.go`.
-2. **Phase 2.4 (threshold alerts)** — `repopulse.yml` declarative thresholds → fail CI / post Slack. Cleanest after 2.3 lands so they share the same workflow harness.
-3. **Finish task #19 (Go port polish)** — parallelize `git show`, investigate the 1-commit off-by-one. Independent of Phase 2.
-4. **Task #18 (mood badge redesign)** — replace the emoji badge with a score ring. UI-only.
-
-**Recommended order**: 2.3 → 2.4 to finish Phase 2, then #19 (polish) and #18 (UI) before opening Phase 3.
+- **GitHub Action** (was 2.3) — PR comments with hotspot/plank-1/plank-2 context. Probably becomes the *delivery surface* for planks 1+2 once those are solid.
+- **Threshold alerts** (was 2.4) — `repopulse.yml` with CI fail / Slack hook. Only useful after planks 1+2 produce signals worth alerting on.
+- **GitHub PR metadata** (was 3.1) — time-to-first-review, merge latency, rubber-stamp detection. Feeds plank 1 (review latency drift) and plank 2 (PR description standards) — **likely the next integration after plank 1 lands.**
+- **Issue-tracker overlay** (was 3.2) — Jira/Linear/GH Issues bug ground truth. Calibrates the bug-keyword signal but isn't urgent now.
+- **Incident feeds** (was 3.3) — Sentry/PagerDuty per-module incident counts. Aspirational.
+- **Test-to-code growth ratio** (was 3.4) — folds naturally into plank 2's "new code without tests" standard.
+- **Multi-repo aggregator** (was 4.1) — one dashboard, many repos. Deferred until a single repo's lens is actually useful.
+- **Team rollups** (was 4.2) — via CODEOWNERS. Becomes a natural grouping overlay on plank 1 once plank 1 is solid.
+- **Benchmarks** (was 4.3) — "your ratio is p80 vs similar repos." Requires a dataset we don't have; deprioritized.
+- **Goal setting** (was 4.4) — quarterly targets per signal. Contradicts the lens-not-scorecard framing; probably won't build as-specified.
+- **Complexity integration** (was 5.1) — cyclomatic via lizard/eslintcc. Feeds plank 2 as a deterministic standard.
+- **Dependency-graph health** (was 5.2) — layer violations. Feeds plank 2.
+- **Per-author personal view** (was 5.3) — now explicitly plank 3's "personal mirror."
+- **Incident correlation study** (was 5.4) — "does the composite score predict incidents?" The real validation experiment, still open.
+- **Bus-factor deep dive** (was 5.5) — per-module + recency-weighted bus factor. Feeds plank 1 as a module-level signal.
 
 ---
 
-## Sequencing logic
+## Non-goals (explicit)
 
-- **Phase 1 pays for itself on the next run** — polish the existing signals already earned. ✅
-- **Phase 2 is the inflection**: the GitHub Action turns this from "a thing you run once" into "a thing in every PR review."
-- **Phase 3 is the accuracy win**: replaces the weakest 30%-weight signal with validated data. Do not build Phase 4/5 before Phase 3; they compound on top of a signal we haven't validated yet.
-- **Phases 4 and 5 only pay off if 1–3 got traction.** Don't build them on spec.
-
-## The one thing to build next if we could only build one
-
-**The Phase 2.3 GitHub Action.** It's the only item on the whole roadmap that guarantees the tool is seen daily by every engineer on every PR — which is the only way a health tool changes behavior. Phase 1 exists largely to make that Action's output actionable enough to be worth reading, and the Go port exists to make shipping it as a single binary trivial.
+- **Engineering productivity rankings.** No "engineers by commits" leaderboard, ever.
+- **Performance-review-ready scorecards.** The signals are for conversation, not evaluation.
+- **AI-required features on the happy path.** Plank 1 is pure Go; plank 2 has a deterministic layer that works without AI. AI enriches, never gatekeeps.
+- **Online service.** The tool stays a local CLI producing a self-contained HTML file. No accounts, no sync, no backend.

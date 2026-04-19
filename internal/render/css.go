@@ -243,6 +243,51 @@ const cssTemplate = `    :root {
     .new-tag { background: rgba(129, 140, 248, 0.15); color: #c7d2fe; font-size: 9px; padding: 2px 7px; border-radius: 999px; margin-left: 8px; font-weight: 700; letter-spacing: 0.12em; border: 1px solid rgba(129, 140, 248, 0.35); vertical-align: middle; }
     .author-email { color: var(--text-faint); font-size: 11px; margin-left: 6px; font-family: 'JetBrains Mono', ui-monospace, monospace; }
 
+    /* Plank 1 — per-author baseline drift cards ("Worth a 1:1") */
+    .section-sub { font-size: 11px; font-weight: 400; color: var(--text-faint); font-family: 'JetBrains Mono', ui-monospace, monospace; letter-spacing: 0.06em; text-transform: lowercase; margin-left: 8px; }
+    .drift-card { border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; background: rgba(148, 163, 184, 0.03); }
+    .drift-card:last-child { margin-bottom: 0; }
+    .drift-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+    .drift-author { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+    .drift-name { color: var(--text); font-weight: 600; font-size: 13px; }
+    .drift-email { color: var(--text-faint); font-size: 11px; font-family: 'JetBrains Mono', ui-monospace, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .drift-stats { display: flex; flex-wrap: wrap; gap: 14px; font-size: 11px; color: var(--text-dim); font-family: 'JetBrains Mono', ui-monospace, monospace; letter-spacing: 0.02em; }
+    .drift-flags { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+    .drift-flag { display: flex; align-items: flex-start; gap: 10px; font-size: 12.5px; color: var(--text); line-height: 1.4; }
+    .drift-pill { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 9.5px; font-weight: 700; padding: 2px 8px; border-radius: 999px; letter-spacing: 0.12em; border: 1px solid; flex-shrink: 0; align-self: center; }
+    .drift-pill.drift-alert { background: rgba(244, 63, 94, 0.14);  color: #fda4af; border-color: rgba(244, 63, 94, 0.40); }
+    .drift-pill.drift-watch { background: rgba(251, 191, 36, 0.12); color: #fde68a; border-color: rgba(251, 191, 36, 0.35); }
+    .drift-pill.drift-info  { background: rgba(34, 211, 238, 0.10); color: #67e8f9; border-color: rgba(34, 211, 238, 0.30); }
+
+    /* Plank 2 — Standards card */
+    .standards-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 18px; }
+    .standards-card { border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; background: rgba(148, 163, 184, 0.03); }
+    .std-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+    .std-title { font-size: 13px; font-weight: 700; letter-spacing: 0.06em; color: var(--text); text-transform: uppercase; }
+    .std-pct { font-size: 22px; font-weight: 700; font-family: 'JetBrains Mono', ui-monospace, monospace; }
+    .std-sub { font-size: 12px; color: var(--text-dim); margin-bottom: 14px; }
+    .std-section-h { font-size: 10px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--text-faint); margin: 12px 0 6px 0; font-weight: 600; }
+    .std-author-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
+    .std-author-row { display: grid; grid-template-columns: 1fr 90px 100px; align-items: center; gap: 10px; font-size: 12px; padding: 3px 0; }
+    .std-author-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+    .std-author-bar { background: rgba(148, 163, 184, 0.10); height: 6px; border-radius: 3px; overflow: hidden; position: relative; }
+    .std-author-bar > span { display: block; height: 100%%; border-radius: 3px; }
+    .std-author-pct { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: var(--text-dim); text-align: right; }
+    .std-author-pct .dim { color: var(--text-faint); margin-left: 4px; }
+    .lang-pill { display: inline-block; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 9.5px; font-weight: 600; padding: 1px 7px; border-radius: 999px; margin-left: 6px; background: rgba(129, 140, 248, 0.10); color: #a5b4fc; border: 1px solid rgba(129, 140, 248, 0.25); letter-spacing: 0.06em; vertical-align: middle; }
+    details.std-samples { margin-top: 12px; }
+    details.std-samples > summary { list-style: none; cursor: pointer; user-select: none; font-size: 11px; color: var(--text-faint); font-family: 'JetBrains Mono', ui-monospace, monospace; letter-spacing: 0.04em; padding: 6px 0; }
+    details.std-samples > summary::-webkit-details-marker { display: none; }
+    details.std-samples > summary::marker { content: ''; }
+    details.std-samples > summary .chevron { display: inline-block; transition: transform 150ms ease; font-size: 9px; margin-right: 4px; }
+    details.std-samples[open] > summary .chevron { transform: rotate(90deg); color: var(--accent); }
+    details.std-samples > ul { list-style: none; padding: 0; margin: 6px 0 0 0; display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; }
+    details.std-samples > ul li { display: grid; grid-template-columns: 70px 110px 1fr; gap: 10px; align-items: center; padding: 3px 0; border-bottom: 1px dashed var(--border); }
+    details.std-samples > ul li:last-child { border-bottom: none; }
+    .std-hash { font-family: 'JetBrains Mono', ui-monospace, monospace; color: var(--text-faint); font-size: 10.5px; }
+    .std-sample-author { font-size: 11px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .std-sample-msg { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
     .mini-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; margin-bottom: 18px; padding-bottom: 18px; border-bottom: 1px solid var(--border); }
     .mini-stats .val { font-size: 22px; font-weight: 700; color: var(--text); font-family: 'JetBrains Mono', ui-monospace, monospace; }
     .mini-stats .lbl { font-size: 10px; color: var(--text-dim); margin-top: 4px; text-transform: uppercase; letter-spacing: 0.14em; font-weight: 600; }

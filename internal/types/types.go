@@ -193,6 +193,83 @@ type AuthorEntry struct {
 	IsNew               bool   `json:"isNew"`
 }
 
+// --- Plank 1: per-author baseline drift ---
+
+type AuthorDriftSignal struct {
+	Type         string        `json:"type"` // "authorDrift"
+	CurrentDays  int           `json:"currentDays"`
+	BaselineDays int           `json:"baselineDays"`
+	Authors      []AuthorDrift `json:"authors"`
+}
+
+type AuthorDrift struct {
+	Name                   string      `json:"name"`
+	Email                  string      `json:"email"`
+	CommitsCurrent         int         `json:"commitsCurrent"`
+	CommitsPerWeekCurrent  float64     `json:"commitsPerWeekCurrent"`
+	CommitsPerWeekBaseline float64     `json:"commitsPerWeekBaseline"`
+	CommitsDeltaPct        float64     `json:"commitsDeltaPct"`
+	WeekendNightCurrent    float64     `json:"weekendNightCurrent"`  // %
+	WeekendNightBaseline   float64     `json:"weekendNightBaseline"` // %
+	WeekendNightDeltaPP    float64     `json:"weekendNightDeltaPP"`  // percentage points
+	FixRatioCurrent        float64     `json:"fixRatioCurrent"`      // %
+	FixRatioBaseline       float64     `json:"fixRatioBaseline"`     // %
+	FixRatioDeltaPP        float64     `json:"fixRatioDeltaPP"`      // percentage points
+	Flags                  []DriftFlag `json:"flags"`
+}
+
+type DriftFlag struct {
+	Kind     string `json:"kind"`     // "cadence-up" | "cadence-down" | "weekend-night-up" | "fix-ratio-up"
+	Severity string `json:"severity"` // "info" | "watch" | "alert"
+	Text     string `json:"text"`
+}
+
+// --- Plank 2: deterministic standards-detection ---
+
+type StandardsSignal struct {
+	Type                string                    `json:"type"` // "standards"
+	ConventionalCommits ConventionalCommitsResult `json:"conventionalCommits"`
+	TestColocation      TestColocationResult      `json:"testColocation"`
+}
+
+type ConventionalCommitsResult struct {
+	Total               int                     `json:"total"`
+	Compliant           int                     `json:"compliant"`
+	CompliancePct       float64                 `json:"compliancePct"`
+	PerAuthor           []AuthorComplianceEntry `json:"perAuthor"`
+	NonCompliantSamples []NonCompliantCommit    `json:"nonCompliantSamples"`
+}
+
+type AuthorComplianceEntry struct {
+	Name          string  `json:"name"`
+	Email         string  `json:"email"`
+	Total         int     `json:"total"`
+	Compliant     int     `json:"compliant"`
+	CompliancePct float64 `json:"compliancePct"`
+}
+
+type NonCompliantCommit struct {
+	Hash    string `json:"hash"`
+	Author  string `json:"author"`
+	Subject string `json:"subject"`
+}
+
+type TestColocationResult struct {
+	Languages      []string                `json:"languages"` // detected source extensions, e.g. [".kt", ".ts"]
+	SourceFiles    int                     `json:"sourceFiles"`
+	Colocated      int                     `json:"colocated"`
+	CoveragePct    float64                 `json:"coveragePct"`
+	PerModule      []ModuleColocationEntry `json:"perModule"`
+	MissingSamples []string                `json:"missingSamples"`
+}
+
+type ModuleColocationEntry struct {
+	Module      string  `json:"module"`
+	SourceFiles int     `json:"sourceFiles"`
+	Colocated   int     `json:"colocated"`
+	CoveragePct float64 `json:"coveragePct"`
+}
+
 type DayBucket struct {
 	Date  string `json:"date"`
 	Count int    `json:"count"`
@@ -218,13 +295,15 @@ type MoodBreakdown struct {
 }
 
 type Signals struct {
-	CommitFrequency FrequencySignal `json:"commitFrequency"`
-	FileChurn       ChurnSignal     `json:"fileChurn"`
-	BugRatio        BugSignal       `json:"bugRatio"`
-	Coverage        *CoverageSignal `json:"coverage"`
-	Modules         ModuleSignal    `json:"modules"`
-	Hotspots        HotspotSignal   `json:"hotspots"`
-	Authors         AuthorSignal    `json:"authors"`
+	CommitFrequency FrequencySignal   `json:"commitFrequency"`
+	FileChurn       ChurnSignal       `json:"fileChurn"`
+	BugRatio        BugSignal         `json:"bugRatio"`
+	Coverage        *CoverageSignal   `json:"coverage"`
+	Modules         ModuleSignal      `json:"modules"`
+	Hotspots        HotspotSignal     `json:"hotspots"`
+	Authors         AuthorSignal      `json:"authors"`
+	AuthorDrift     AuthorDriftSignal `json:"authorDrift"`
+	Standards       StandardsSignal   `json:"standards"`
 }
 
 type NarrativeBullet struct {

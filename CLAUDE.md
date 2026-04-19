@@ -10,11 +10,13 @@ No AI. No external APIs. Pure git data + math + Chart.js output.
 
 ## Current state (read this first when resuming)
 
-**Phase 1 complete. Phase 2.1 + 2.2 (snapshot store + trend chart) shipped. Codebase is 100% Go.**
+**Phase 1 complete. Direction pivoted to the "3-plank lens" model (see ROADMAP.md). Plank 1 + Plank 2 deterministic layer shipped. Codebase is 100% Go.**
 
 - Application code + all signal math: `cmd/repopulse/main.go` + `internal/*`
 - Persistent snapshot store: `internal/snapshots/` writes `<repo>/.repopulse/snapshots/<ts>.json` every run, capped at 365, gitignore auto-laid. Opt out with `-no-snapshot`.
 - Trend chart in HTML report: `internal/render/trends.go` reads the store and renders a multi-series Chart.js line (composite shown by default, 5 per-signal series legend-toggleable).
+- **Plank 1 — baseline drift:** `internal/baseline/` compares each contributor against their own 6×-window historical baseline on commit cadence, weekend/night %, and fix-vs-feature mix. Flagged deltas render in a "Worth a 1:1" card. No cross-author ranking — ever.
+- **Plank 2 — standards detection (deterministic layer):** `internal/standards/` computes conventional-commit compliance + test-file colocation from commit messages and HEAD's tracked files. Rendered in a "Standards" card. AI enrichment layer is on the roadmap but not built.
 - Fixture generator for the Playwright e2e tests: `cmd/fixture-gen/main.go`
 - Ships as a **4 MB static binary** (`repopulse.exe`) with a single runtime dependency (the `git` command on PATH)
 
@@ -49,6 +51,8 @@ repopulse/
 │   ├── config/         # ignore patterns + bug-keyword tiers
 │   ├── codeowners/     # CODEOWNERS parser, path matcher
 │   ├── snapshots/      # Phase 2.1 persistent store: save/load/prune `.repopulse/snapshots/`
+│   ├── baseline/       # Plank 1: per-author drift vs their own historical baseline
+│   ├── standards/      # Plank 2 deterministic: conventional-commit compliance + test-file colocation
 │   ├── signals/        # per-signal computations
 │   │   ├── frequency.go    # Commit cadence
 │   │   ├── churn.go        # Churn density + throughput
@@ -149,8 +153,8 @@ Two suites, both green:
 
 | Suite | Count | Command | Notes |
 |-------|-------|---------|-------|
-| Go unit | 78 | `go test ./internal/...` | Pure math verification over deterministic fixtures |
-| Playwright e2e | 27 | `npx playwright test` | Drives a real browser against fixture + real-data reports |
+| Go unit | 117 | `go test ./internal/...` | Pure math verification over deterministic fixtures |
+| Playwright e2e | 31 | `npx playwright test` | Drives a real browser against fixture + real-data reports |
 
 Playwright requires `fixture-gen.exe` to be built first — `tests/e2e/fixtures.ts` execs it to produce the fixture HTML. `playwright.config.ts` does not currently auto-build; add a `globalSetup` hook when this becomes friction.
 
@@ -190,6 +194,12 @@ The CLI defaults all outputs under `output/` and auto-creates the parent directo
 
 ### Snapshot store (Phase 2.1)
 Lives **inside the analyzed repo** at `<repoPath>/.repopulse/snapshots/`, not the cwd — keeps history portable with the repo so a teammate's report includes the same trend. First write lays down `.repopulse/.gitignore` with `*` so the store never accidentally gets committed. Filenames are UTC ISO timestamps (`2026-04-19T020807Z.json`) so lexical sort = chronological sort. Pruning is count-based (default 365 newest); replace with retention-policy logic if/when needed.
+
+### Plank 1 baseline drift (internal/baseline)
+Fetches a baseline window 6× the current window (non-overlapping, immediately prior) via a second `git.CollectCommits` call with `Until` set to `windowStart`. Each author's current stats (cadence, weekend-night %, fix-ratio) are compared to their own baseline. Flagging requires BOTH a relative-magnitude threshold AND an absolute-volume floor — prevents noise at small commit counts (e.g. 100% cadence increase on 1 commit/week doesn't fire). Only authors with ≥3 current + ≥5 baseline commits are evaluated; authors with no flags are silently dropped so the "Worth a 1:1" card only ever shows signal.
+
+### Plank 2 standards detection (internal/standards)
+Two deterministic signals today: conventional-commit compliance (regex over subject lines, `type(scope?)!?: subject`) and test-file colocation (per-language rules in `colocation.go`, e.g. `Foo.kt` ↔ `FooTest.kt` direct sibling OR mirrored `src/test/...` path for Kotlin; `foo.ts` ↔ `foo.test.ts`/`foo.spec.ts` for TS; `foo.go` ↔ `foo_test.go` for Go; etc.). The colocation pass walks `git ls-files` at HEAD, NOT just files touched in the window, so the result reflects the whole repo. Module breakdown uses the same top-level-dir convention as the existing modules signal.
 
 ---
 

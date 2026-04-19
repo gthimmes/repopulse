@@ -23,14 +23,18 @@ Two artifacts, written to `output/` by default:
 
 ## What's in the report
 
-- **Mood badge** — composite score 0–100 with mood label *(redesign pending — task #18)*
+- **Mood badge** — composite score 0–100 with a `0 = calm / 100 = chaotic / lower is better` scale hint
 - **Findings** — 3–8 narrative bullets sorted by severity (alert/warn/info/good)
+- **Score trend across snapshots** — composite + per-signal lines across every past run (snapshots auto-stored in `.repopulse/snapshots/`)
+- **Standards** — deterministic compliance card: conventional-commit format % + test-file colocation % with per-author and per-module breakdowns
+- **Stats row** — commits, files touched, bug %, commits/day
 - **Score breakdown** — per-signal horizontal bars with bands
 - **Module mood grid** — per top-level directory with team ownership from CODEOWNERS
 - **Hotspots** — expandable rows showing recommendations, top authors, and recent bug-tier commits
 - **Commit frequency** / **Mood timeline** / **Bug signal timeline**
-- **Bug explainability** — collapsible panel showing which commits matched which keywords
+- **Bug explainability** — collapsible panel with tier legend + classified sample commits per tier
 - **Authors** — weekend/night %, bus factor, top-10 table
+- **Worth a 1:1** — per-author baseline drift: cadence, off-hours, fix-vs-feature shifts vs each contributor's own history (not a peer ranking)
 - **Top churned files** — sortable
 - **Coverage** — if your repo generates an Istanbul or lcov report
 
@@ -134,9 +138,14 @@ Both suites are expected green. Playwright requires `fixture-gen` to be built fi
 
 - ✅ **Phase 1 complete** — drill-downs, bug explainability, CODEOWNERS teams, recommendations, markdown digest
 - ✅ **Go port complete** — TypeScript fully removed; codebase is 100% Go
-- ✅ **Phase 2.1 + 2.2** — persistent snapshot store + trend charts in the report
-- ⏳ **Phase 2 remaining** — GitHub Action (2.3), threshold alerts (2.4)
-- ⏳ **Go port polish** (task #19) — `git show` parallelization, 1-commit off-by-one fix
+- ✅ **Snapshot store + trend chart** — persistent JSON history + multi-series Chart.js line in the report
+- ✅ **Plank 1 — baseline drift** — per-author cadence / weekend-night / fix-ratio vs their own 6×-window baseline in a "Worth a 1:1" card
+- ✅ **Plank 2 deterministic** — conventional-commit compliance + test-file colocation signal
+- ⏳ **Plank 3** — filters, drill-down on Top Churned Files, personal-mirror view
+- ⏳ **Plank 2 AI layer** — collect → enrich → render split + Anthropic API / Claude Code skill modes
+- ⏳ **Go port polish** — `git show` parallelization, 1-commit off-by-one fix
+
+See `ROADMAP.md` for the full direction.
 
 Full context: see [ROADMAP.md](./ROADMAP.md) for where we've been and where we're going, and [CLAUDE.md](./CLAUDE.md) for developer-facing setup and architecture notes.
 

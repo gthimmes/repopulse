@@ -34,6 +34,8 @@ func RenderHTML(data types.MoodResult, meta types.RepoMeta, delta *types.MoodDel
 		deltaHTML = renderDelta(*delta)
 	}
 	bugWhyHTML := renderBugExplainability(data.Signals.BugRatio)
+	driftHTML := renderAuthorDrift(data.Signals.AuthorDrift)
+	standardsHTML := renderStandards(data.Signals.Standards)
 	trendSectionHTML := TrendSection(trends)
 	trendInit := ""
 	if len(trends) > 1 {
@@ -119,6 +121,9 @@ func RenderHTML(data types.MoodResult, meta types.RepoMeta, delta *types.MoodDel
     <!-- Trends across snapshots -->
     %s
 
+    <!-- Standards (Plank 2) -->
+    %s
+
     <!-- Stats Row -->
     <div class="stats-row">
       <div class="stat-card">
@@ -187,6 +192,9 @@ func RenderHTML(data types.MoodResult, meta types.RepoMeta, delta *types.MoodDel
       </div>
       <div>%s</div>
     </div>
+
+    <!-- Worth a 1:1 — per-author baseline drift (Plank 1) -->
+    %s
 
     <!-- Top Churned Files -->
     <div class="card" style="margin-bottom:24px">
@@ -281,6 +289,7 @@ func RenderHTML(data types.MoodResult, meta types.RepoMeta, delta *types.MoodDel
 		meta.AnalyzedCommits,
 		narrativeHTML,
 		trendSectionHTML,
+		standardsHTML,
 		meta.AnalyzedCommits, meta.WindowDays,
 		formatThousands(filesTouched), data.Signals.FileChurn.EligibleFileCount,
 		bugPct, data.Signals.BugRatio.ChaosCommitCount,
@@ -294,6 +303,7 @@ func RenderHTML(data types.MoodResult, meta types.RepoMeta, delta *types.MoodDel
 		fmt1(data.Signals.Authors.BusFactorTop1Pct),
 		fmt1(data.Signals.Authors.NewContributorChurnPct),
 		authorsHTML,
+		driftHTML,
 		churnRows,
 		coveragePanel,
 		formatDateLong(meta.GeneratedAt),
@@ -553,6 +563,231 @@ func renderAuthors(authors []types.AuthorEntry) string {
 			wnColor, a.WeekendNightCommits)
 	}
 	return sb.String()
+}
+
+// renderAuthorDrift produces the "Worth a 1:1" Plank-1 card. Only renders
+// when at least one contributor has a flagged drift; otherwise emits an
+// empty (and visually clean) "no drift" card so users know the analysis
+// ran and didn't surface anything.
+func renderAuthorDrift(d types.AuthorDriftSignal) string {
+	if d.CurrentDays == 0 && d.BaselineDays == 0 {
+		return "" // signal not populated (e.g. fixture without drift) — render nothing
+	}
+	if len(d.Authors) == 0 {
+		return fmt.Sprintf(`<div class="card" style="margin-bottom:24px">
+      <h2>Worth a 1:1 <span class="section-sub">&middot; per-author drift vs %d-day baseline</span></h2>
+      <p style="color:var(--text-dim);font-size:13px;margin:0">
+        No contributors crossed the drift thresholds in the current %d-day window.
+        Each person is compared against <em>their own</em> rolling baseline &mdash;
+        cards here only appear when cadence, off-hours load, or fix-vs-feature mix
+        moves meaningfully against that baseline (and absolute volume is non-trivial).
+      </p>
+    </div>`, d.BaselineDays, d.CurrentDays)
+	}
+
+	var cards strings.Builder
+	for _, a := range d.Authors {
+		var flagsHTML strings.Builder
+		for _, f := range a.Flags {
+			fmt.Fprintf(&flagsHTML, `<li class="drift-flag drift-%s"><span class="drift-pill drift-%s">%s</span><span>%s</span></li>`,
+				f.Severity, f.Severity, escapeHTML(strings.ToUpper(f.Severity)), escapeHTML(f.Text))
+		}
+		fmt.Fprintf(&cards, `<div class="drift-card">
+      <div class="drift-head">
+        <div class="drift-author">
+          <span class="drift-name">%s</span>
+          <span class="drift-email">%s</span>
+        </div>
+        <div class="drift-stats">
+          <span title="commits/week now vs baseline">%.1f / %.1f cmt/wk</span>
+          <span title="weekend or night-hour share now vs baseline">%.0f%% / %.0f%% off-hours</span>
+          <span title="bug-tier (chaos+normal+routine) share of their commits now vs baseline">%.0f%% / %.0f%% fix-mix</span>
+        </div>
+      </div>
+      <ul class="drift-flags">%s</ul>
+    </div>`,
+			escapeHTML(a.Name),
+			escapeHTML(a.Email),
+			a.CommitsPerWeekCurrent, a.CommitsPerWeekBaseline,
+			a.WeekendNightCurrent, a.WeekendNightBaseline,
+			a.FixRatioCurrent, a.FixRatioBaseline,
+			flagsHTML.String(),
+		)
+	}
+	return fmt.Sprintf(`<div class="card" style="margin-bottom:24px">
+      <h2>Worth a 1:1 <span class="section-sub">&middot; per-author drift vs %d-day baseline</span></h2>
+      <p style="color:var(--text-dim);font-size:12.5px;margin:0 0 14px 0">
+        Each card compares one contributor against <em>their own</em> prior pattern &mdash;
+        not against the team. These are observations to discuss, not scores to act on.
+      </p>
+      %s
+    </div>`, d.BaselineDays, cards.String())
+}
+
+// renderStandards is the Plank-2 deterministic-standards card. Two
+// sub-sections: Conventional-commit compliance and test-file colocation.
+// Both render with the same coaching framing — observation, not score.
+func renderStandards(s types.StandardsSignal) string {
+	if s.Type == "" {
+		return ""
+	}
+	cc := renderConventionalCommits(s.ConventionalCommits)
+	tc := renderTestColocation(s.TestColocation)
+	if cc == "" && tc == "" {
+		return ""
+	}
+	return fmt.Sprintf(`<div class="card" style="margin-bottom:24px">
+      <h2>Standards <span class="section-sub">&middot; deterministic checks, no AI</span></h2>
+      <div class="standards-row">%s%s</div>
+    </div>`, cc, tc)
+}
+
+func renderConventionalCommits(c types.ConventionalCommitsResult) string {
+	if c.Total == 0 {
+		return ""
+	}
+	pctColor := pctColor(c.CompliancePct)
+
+	var perAuthor strings.Builder
+	shown := 0
+	for _, a := range c.PerAuthor {
+		if a.Total < 3 {
+			continue
+		}
+		if shown >= 8 {
+			break
+		}
+		shown++
+		barColor := pctColor2(a.CompliancePct)
+		fmt.Fprintf(&perAuthor, `<li class="std-author-row">
+      <span class="std-author-name" title="%s">%s</span>
+      <span class="std-author-bar"><span style="width:%.0f%%;background:%s"></span></span>
+      <span class="std-author-pct">%.0f%% <span class="dim">(%d/%d)</span></span>
+    </li>`,
+			escapeHTML(a.Email),
+			escapeHTML(shorten(a.Name, 22)),
+			a.CompliancePct, barColor,
+			a.CompliancePct, a.Compliant, a.Total,
+		)
+	}
+
+	var samples strings.Builder
+	for _, s := range c.NonCompliantSamples {
+		fmt.Fprintf(&samples, `<li>
+      <span class="std-hash">%s</span>
+      <span class="std-sample-author">%s</span>
+      <span class="std-sample-msg" title="%s">%s</span>
+    </li>`,
+			escapeHTML(s.Hash),
+			escapeHTML(shorten(s.Author, 14)),
+			escapeHTML(s.Subject),
+			escapeHTML(shorten(s.Subject, 90)),
+		)
+	}
+
+	return fmt.Sprintf(`<div class="standards-card">
+      <div class="std-head">
+        <div class="std-title">Conventional commits</div>
+        <div class="std-pct" style="color:%s">%.1f%%</div>
+      </div>
+      <div class="std-sub">%d of %d commits in this window match <code>type(scope?)!?: subject</code>.</div>
+      <div class="std-section-h">Per-author (≥3 commits, sorted lowest first)</div>
+      <ul class="std-author-list">%s</ul>
+      %s
+    </div>`,
+		pctColor, c.CompliancePct,
+		c.Compliant, c.Total,
+		perAuthor.String(),
+		conditionalNonCompliantPanel(samples.String()),
+	)
+}
+
+func conditionalNonCompliantPanel(samples string) string {
+	if samples == "" {
+		return ""
+	}
+	return fmt.Sprintf(`<details class="std-samples">
+        <summary><span class="chevron">&#x25B6;</span> non-compliant samples (newest first)</summary>
+        <ul>%s</ul>
+      </details>`, samples)
+}
+
+func renderTestColocation(c types.TestColocationResult) string {
+	if c.SourceFiles == 0 {
+		return ""
+	}
+	pctColor := pctColor(c.CoveragePct)
+
+	var langPills strings.Builder
+	for _, l := range c.Languages {
+		fmt.Fprintf(&langPills, `<span class="lang-pill">%s</span>`, escapeHTML(l))
+	}
+
+	var perModule strings.Builder
+	for _, m := range c.PerModule {
+		barColor := pctColor2(m.CoveragePct)
+		fmt.Fprintf(&perModule, `<li class="std-author-row">
+      <span class="std-author-name">%s</span>
+      <span class="std-author-bar"><span style="width:%.0f%%;background:%s"></span></span>
+      <span class="std-author-pct">%.0f%% <span class="dim">(%d/%d)</span></span>
+    </li>`,
+			escapeHTML(m.Module),
+			m.CoveragePct, barColor,
+			m.CoveragePct, m.Colocated, m.SourceFiles,
+		)
+	}
+
+	var missing strings.Builder
+	for _, f := range c.MissingSamples {
+		fmt.Fprintf(&missing, `<li><code>%s</code></li>`, escapeHTML(f))
+	}
+
+	missingPanel := ""
+	if missing.Len() > 0 {
+		missingPanel = fmt.Sprintf(`<details class="std-samples">
+        <summary><span class="chevron">&#x25B6;</span> source files missing a sibling test (sample)</summary>
+        <ul>%s</ul>
+      </details>`, missing.String())
+	}
+
+	return fmt.Sprintf(`<div class="standards-card">
+      <div class="std-head">
+        <div class="std-title">Test-file colocation %s</div>
+        <div class="std-pct" style="color:%s">%.1f%%</div>
+      </div>
+      <div class="std-sub">%d of %d source files have a sibling test file at HEAD.</div>
+      <div class="std-section-h">Worst-covered modules (≥5 source files)</div>
+      <ul class="std-author-list">%s</ul>
+      %s
+    </div>`,
+		langPills.String(),
+		pctColor, c.CoveragePct,
+		c.Colocated, c.SourceFiles,
+		perModule.String(),
+		missingPanel,
+	)
+}
+
+func pctColor(p float64) string {
+	switch {
+	case p >= 80:
+		return "#4ade80"
+	case p >= 50:
+		return "#fbbf24"
+	default:
+		return "#f87171"
+	}
+}
+
+func pctColor2(p float64) string {
+	switch {
+	case p >= 80:
+		return "rgba(74, 222, 128, 0.55)"
+	case p >= 50:
+		return "rgba(251, 191, 36, 0.55)"
+	default:
+		return "rgba(244, 114, 114, 0.55)"
+	}
 }
 
 func renderDelta(d types.MoodDelta) string {
