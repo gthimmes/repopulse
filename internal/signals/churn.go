@@ -3,6 +3,7 @@ package signals
 import (
 	"math"
 	"sort"
+	"time"
 
 	"repopulse/internal/types"
 )
@@ -14,7 +15,15 @@ type ChurnOptions struct {
 	// GetLineCount returns the current line count of a file at HEAD. Used
 	// for the churn-to-size ratio.
 	GetLineCount func(path string) int
+	// BugOptions classifies the recent-commit drill-down samples per file
+	// so the UI can color-tag them with their bug tier. When zero-valued
+	// the classifier still runs and returns TierNone for everything.
+	BugOptions BugOptions
 }
+
+// churnRecentCommitCap caps how many recent commits we keep per file
+// for the drill-down panel.
+const churnRecentCommitCap = 12
 
 const (
 	ratioCap                = 10.0
@@ -37,6 +46,9 @@ func ComputeChurn(commits []types.CommitRecord, opts ChurnOptions) types.ChurnSi
 
 	type pathStats struct {
 		added, removed int
+		// commits touching this file, newest first after sort below
+		touchingCommits []types.CommitRecord
+		authorCommits   map[string]int
 	}
 	fileStats := map[string]*pathStats{}
 	for _, c := range commits {
@@ -46,11 +58,13 @@ func ComputeChurn(commits []types.CommitRecord, opts ChurnOptions) types.ChurnSi
 			}
 			s := fileStats[f.Path]
 			if s == nil {
-				s = &pathStats{}
+				s = &pathStats{authorCommits: map[string]int{}}
 				fileStats[f.Path] = s
 			}
 			s.added += f.Added
 			s.removed += f.Removed
+			s.touchingCommits = append(s.touchingCommits, c)
+			s.authorCommits[c.AuthorName]++
 		}
 	}
 
@@ -92,13 +106,25 @@ func ComputeChurn(commits []types.CommitRecord, opts ChurnOptions) types.ChurnSi
 		}
 		rawRatio := float64(f.total) / float64(denom)
 		capped := math.Min(ratioCap, rawRatio)
-		resolved[i] = types.ChurnEntry{
+
+		stats := fileStats[f.path]
+		entry := types.ChurnEntry{
 			Path:      f.path,
 			Added:     f.added,
 			Removed:   f.removed,
 			Ratio:     math.Round(capped*100) / 100,
 			Rewritten: rawRatio > rewrittenThreshold,
 		}
+		// Build drill-down data for the top 20 only (what the report
+		// actually surfaces). Skipping it for the rest keeps the JSON
+		// snapshot small on large repos.
+		if i < 20 && stats != nil {
+			entry.TotalCommits = len(stats.touchingCommits)
+			entry.TopAuthorsOfFile = topAuthorsOfFile(stats.authorCommits)
+			entry.RecentCommits = recentCommitsForFile(stats.touchingCommits, opts.BugOptions)
+			entry.LastTouched = lastTouchedDate(stats.touchingCommits)
+		}
+		resolved[i] = entry
 	}
 
 	// Eligible: has real churn AND real size AND not rewritten
@@ -167,4 +193,64 @@ func ComputeChurn(commits []types.CommitRecord, opts ChurnOptions) types.ChurnSi
 		TotalLinesChanged:  totalLinesChanged,
 		LinesPerDay:        math.Round(linesPerDay),
 	}
+}
+
+// topAuthorsOfFile returns the top-3 authors by commit count for a file,
+// sorted descending. Mirrors the hotspot signal's per-file author block
+// so the renderer can share UI.
+func topAuthorsOfFile(authorCommits map[string]int) []types.HotspotFileAuthor {
+	type kv struct {
+		name string
+		n    int
+	}
+	pairs := make([]kv, 0, len(authorCommits))
+	for n, c := range authorCommits {
+		pairs = append(pairs, kv{n, c})
+	}
+	sort.Slice(pairs, func(i, j int) bool { return pairs[i].n > pairs[j].n })
+	if len(pairs) > 3 {
+		pairs = pairs[:3]
+	}
+	out := make([]types.HotspotFileAuthor, len(pairs))
+	for i, p := range pairs {
+		out[i] = types.HotspotFileAuthor{Name: p.name, Commits: p.n}
+	}
+	return out
+}
+
+// recentCommitsForFile returns the newest-first capped sample of commits
+// touching one file, classified with bug tier so the UI can color them.
+func recentCommitsForFile(commits []types.CommitRecord, bugOpts BugOptions) []types.HotspotCommit {
+	cs := append([]types.CommitRecord(nil), commits...)
+	sort.SliceStable(cs, func(i, j int) bool {
+		return cs[i].Date.After(cs[j].Date)
+	})
+	if len(cs) > churnRecentCommitCap {
+		cs = cs[:churnRecentCommitCap]
+	}
+	out := make([]types.HotspotCommit, len(cs))
+	for i, c := range cs {
+		tier := ClassifyCommit(c.Message, c.IsRevert, bugOpts)
+		out[i] = types.HotspotCommit{
+			Hash:    shortHash(c.Hash),
+			Date:    c.Date.UTC().Format("2006-01-02"),
+			Author:  c.AuthorName,
+			Message: firstLine(c.Message, 140),
+			Tier:    string(tier),
+		}
+	}
+	return out
+}
+
+func lastTouchedDate(commits []types.CommitRecord) string {
+	var latest time.Time
+	for _, c := range commits {
+		if c.Date.After(latest) {
+			latest = c.Date
+		}
+	}
+	if latest.IsZero() {
+		return ""
+	}
+	return latest.UTC().Format("2006-01-02")
 }

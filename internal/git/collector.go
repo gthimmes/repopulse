@@ -103,8 +103,8 @@ func GetPreWindowAuthorEmails(repoPath string, before time.Time) (map[string]str
 }
 
 // ListFiles returns every file tracked at HEAD via `git ls-files`. Used
-// by the standards signals (test-file colocation) to walk the working
-// tree without falling back to OS-level globbing.
+// by the standards signals (test density) to walk the working tree
+// without falling back to OS-level globbing.
 func ListFiles(repoPath string) ([]string, error) {
 	cmd := exec.Command("git", "-C", repoPath, "ls-files")
 	out, err := cmd.Output()

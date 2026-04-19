@@ -125,6 +125,7 @@ func run(repoPathRaw string, opts types.CliOptions) error {
 		IsExcluded:   isExcluded,
 		WindowDays:   effectiveWindowDays,
 		GetLineCount: func(p string) int { return git.GetFileLineCount(repoPath, p) },
+		BugOptions:   bugOpts,
 	})
 	bug := signals.ComputeBugRatio(commits, bugOpts)
 	cov := signals.DetectCoverage(repoPath)
@@ -174,12 +175,12 @@ func run(repoPathRaw string, opts types.CliOptions) error {
 	})
 
 	// Plank 2 — deterministic standards. Conventional-commit compliance
-	// is computed over the current window's commits; test-file colocation
-	// over the full HEAD file set so the result reflects the whole repo,
+	// is computed over the current window's commits; test density over
+	// the full HEAD file set so the result reflects the whole repo,
 	// not just files changed in the window.
 	allFiles, err := git.ListFiles(repoPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not list files for colocation analysis: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Warning: could not list files for test-density analysis: %v\n", err)
 	}
 	standardsSig := standards.Compute(commits, allFiles)
 

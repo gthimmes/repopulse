@@ -13,7 +13,7 @@ func Compute(commits []types.CommitRecord, allFiles []string) types.StandardsSig
 	return types.StandardsSignal{
 		Type:                "standards",
 		ConventionalCommits: ComputeConventionalCommits(commits),
-		TestColocation:      ComputeTestColocation(allFiles),
+		TestDensity:         ComputeTestDensity(allFiles),
 	}
 }
 

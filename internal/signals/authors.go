@@ -31,6 +31,9 @@ func ComputeAuthors(commits []types.CommitRecord, opts AuthorOptions) types.Auth
 		nightEnd = 7
 	}
 
+	type fileTouch struct {
+		commits, added, removed int
+	}
 	type agg struct {
 		name                string
 		email               string
@@ -38,6 +41,8 @@ func ComputeAuthors(commits []types.CommitRecord, opts AuthorOptions) types.Auth
 		linesChanged        int
 		weekendNightCommits int
 		firstSeen           time.Time
+		// per-file touches by this author for the drill-down panel
+		files map[string]*fileTouch
 	}
 	byEmail := map[string]*agg{}
 	totalLines := 0
@@ -50,6 +55,7 @@ func ComputeAuthors(commits []types.CommitRecord, opts AuthorOptions) types.Auth
 				name:      c.AuthorName,
 				email:     c.AuthorEmail,
 				firstSeen: c.AuthorDate,
+				files:     map[string]*fileTouch{},
 			}
 			byEmail[c.AuthorEmail] = a
 		}
@@ -64,6 +70,15 @@ func ComputeAuthors(commits []types.CommitRecord, opts AuthorOptions) types.Auth
 			lines := f.Added + f.Removed
 			a.linesChanged += lines
 			totalLines += lines
+
+			ft, ok := a.files[f.Path]
+			if !ok {
+				ft = &fileTouch{}
+				a.files[f.Path] = ft
+			}
+			ft.commits++
+			ft.added += f.Added
+			ft.removed += f.Removed
 		}
 		if isWeekendOrNight(c.AuthorDate, nightStart, nightEnd) {
 			a.weekendNightCommits++
@@ -141,13 +156,45 @@ func ComputeAuthors(commits []types.CommitRecord, opts AuthorOptions) types.Auth
 
 	score := int(math.Round(weekendNightScore*0.45 + busFactorScore*0.35 + newContribScore*0.20))
 
-	top := ranked
-	if len(top) > 10 {
-		top = top[:10]
+	// Build the full Contributors list, sorted by lines-changed desc.
+	// This drives the bottom-of-report explorer; mini-stats above use
+	// the same data for "Distinct authors" / "Top author share" / etc.
+	contribOrder := append([]*agg(nil), ranked...)
+	sort.SliceStable(contribOrder, func(i, j int) bool {
+		if contribOrder[i].linesChanged != contribOrder[j].linesChanged {
+			return contribOrder[i].linesChanged > contribOrder[j].linesChanged
+		}
+		return contribOrder[i].commitCount > contribOrder[j].commitCount
+	})
+	// Pull each author's top 5 most-touched files for their drill-down.
+	pickTopFiles := func(files map[string]*fileTouch, n int) []types.AuthorFileTouch {
+		type pair struct {
+			path                    string
+			commits, added, removed int
+		}
+		pairs := make([]pair, 0, len(files))
+		for p, t := range files {
+			pairs = append(pairs, pair{p, t.commits, t.added, t.removed})
+		}
+		sort.Slice(pairs, func(i, j int) bool {
+			if pairs[i].commits != pairs[j].commits {
+				return pairs[i].commits > pairs[j].commits
+			}
+			return (pairs[i].added + pairs[i].removed) > (pairs[j].added + pairs[j].removed)
+		})
+		if len(pairs) > n {
+			pairs = pairs[:n]
+		}
+		out := make([]types.AuthorFileTouch, len(pairs))
+		for i, p := range pairs {
+			out[i] = types.AuthorFileTouch{Path: p.path, Commits: p.commits, Added: p.added, Removed: p.removed}
+		}
+		return out
 	}
-	topAuthors := make([]types.AuthorEntry, len(top))
-	for i, a := range top {
-		topAuthors[i] = types.AuthorEntry{
+
+	contributors := make([]types.AuthorEntry, len(contribOrder))
+	for i, a := range contribOrder {
+		contributors[i] = types.AuthorEntry{
 			Name:                a.name,
 			Email:               a.email,
 			Commits:             a.commitCount,
@@ -155,6 +202,7 @@ func ComputeAuthors(commits []types.CommitRecord, opts AuthorOptions) types.Auth
 			WeekendNightCommits: a.weekendNightCommits,
 			FirstSeen:           a.firstSeen.UTC().Format("2006-01-02"),
 			IsNew:               isNew(a),
+			TopFiles:            pickTopFiles(a.files, 5),
 		}
 	}
 
@@ -166,7 +214,7 @@ func ComputeAuthors(commits []types.CommitRecord, opts AuthorOptions) types.Auth
 		BusFactorTop1Pct:       round1(top1Pct),
 		BusFactorTop3Pct:       round1(top3Pct),
 		NewContributorChurnPct: round1(newContribPct),
-		TopAuthors:             topAuthors,
+		Contributors:           contributors,
 	}
 }
 
@@ -189,3 +237,4 @@ func isWeekendOrNight(d time.Time, nightStart, nightEnd int) bool {
 func round1(x float64) float64 {
 	return math.Round(x*10) / 10
 }
+

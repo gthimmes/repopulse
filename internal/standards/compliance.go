@@ -3,8 +3,9 @@
 // tree, no AI required. AI enrichment lands in a later layer.
 //
 // First two signals: conventional-commit compliance (this file) and
-// test-file colocation (colocation.go). The framing throughout is
-// "observation worth a conversation," not "score worth a ranking."
+// test density (colocation.go — filename retained for legacy). The
+// framing throughout is "observation worth a conversation," not
+// "score worth a ranking."
 package standards
 
 import (

@@ -13,7 +13,6 @@ import (
 // the full list of historical snapshots (may be empty or nil) used to
 // render the trend-chart section; pass nil when none are available.
 func RenderHTML(data types.MoodResult, meta types.RepoMeta, delta *types.MoodDelta, trends []compare.ReportSnapshot) string {
-	mc := moodConfig(data.Mood)
 	avgPerDay := float64(meta.AnalyzedCommits) / float64(max1(meta.WindowDays))
 	bugPct := int(data.Signals.BugRatio.Ratio*100 + 0.5)
 	filesTouched := data.Signals.FileChurn.TotalFilesTouched
@@ -28,13 +27,11 @@ func RenderHTML(data types.MoodResult, meta types.RepoMeta, delta *types.MoodDel
 	narrativeHTML := renderNarrative(data.Narrative)
 	modulesHTML := renderModules(data.Signals.Modules.Modules)
 	hotspotsHTML := renderHotspots(data.Signals.Hotspots.Hotspots)
-	authorsHTML := renderAuthors(data.Signals.Authors.TopAuthors)
 	deltaHTML := ""
 	if delta != nil {
 		deltaHTML = renderDelta(*delta)
 	}
 	bugWhyHTML := renderBugExplainability(data.Signals.BugRatio)
-	driftHTML := renderAuthorDrift(data.Signals.AuthorDrift)
 	standardsHTML := renderStandards(data.Signals.Standards)
 	trendSectionHTML := TrendSection(trends)
 	trendInit := ""
@@ -103,12 +100,21 @@ func RenderHTML(data types.MoodResult, meta types.RepoMeta, delta *types.MoodDel
   <div class="container">
     %s
 
-    <!-- Mood Badge -->
-    <div class="mood-badge">
-      <span class="mood-emoji">%s</span>
-      <div class="mood-label">%s%s</div>
-      <div class="mood-score">SCORE <b>%d</b> / 100</div>
-      <div class="mood-scale">0 = calm &middot; 100 = chaotic &middot; lower is better</div>
+    <!-- Pressure Badge -->
+    <div class="mood-badge pressure-badge">
+      <div class="pressure-headline">REPO PRESSURE</div>
+      <div class="pressure-score">%d<span class="pressure-of">/ 100</span>%s</div>
+      <div class="pressure-band band-%s">%s</div>
+      <div class="pressure-bar">
+        <div class="pressure-bar-track">
+          <div class="pressure-bar-marker" style="left:%d%%"></div>
+        </div>
+        <div class="pressure-bar-labels">
+          <span class="band-label band-steady">0 &middot; Steady &middot; 40</span>
+          <span class="band-label band-active">41 &middot; Active &middot; 70</span>
+          <span class="band-label band-volatile">71 &middot; Volatile &middot; 100</span>
+        </div>
+      </div>
       <div class="mood-meta">%s &middot; %dD (%s &rarr; %s) &middot; %d COMMITS</div>
     </div>
 
@@ -181,42 +187,17 @@ func RenderHTML(data types.MoodResult, meta types.RepoMeta, delta *types.MoodDel
       %s
     </div>
 
-    <!-- Authors panel -->
+    <!-- Top Churned Files (drillable, Plank 3) -->
     <div class="card" style="margin-bottom:24px">
-      <h2>Authors</h2>
-      <div class="mini-stats">
-        <div><div class="val">%d</div><div class="lbl">Distinct</div></div>
-        <div><div class="val">%s%%</div><div class="lbl">Weekend/night</div></div>
-        <div><div class="val">%s%%</div><div class="lbl">Top author share</div></div>
-        <div><div class="val">%s%%</div><div class="lbl">LOC by new</div></div>
+      <h2>Top Churned Files <span class="sub">· click any row to drill in</span></h2>
+      <div class="hotspot-list">
+        %s
       </div>
-      <div>%s</div>
     </div>
 
-    <!-- Worth a 1:1 — per-author baseline drift (Plank 1) -->
     %s
 
-    <!-- Top Churned Files -->
-    <div class="card" style="margin-bottom:24px">
-      <h2>Top Churned Files</h2>
-      <div style="overflow-x:auto">
-        <table id="churnTable">
-          <thead>
-            <tr>
-              <th onclick="sortTable(0)">File path &#x25B4;&#x25BE;</th>
-              <th onclick="sortTable(1)" style="text-align:right">Added &#x25B4;&#x25BE;</th>
-              <th onclick="sortTable(2)" style="text-align:right">Removed &#x25B4;&#x25BE;</th>
-              <th onclick="sortTable(3)" style="text-align:right">Total &#x25B4;&#x25BE;</th>
-              <th onclick="sortTable(4)" style="text-align:center">Ratio &#x25B4;&#x25BE;</th>
-            </tr>
-          </thead>
-          <tbody>
-            %s
-          </tbody>
-        </table>
-      </div>
-    </div>
-
+    <!-- Contributors explorer (bottom of report, drillable) -->
     %s
 
     <!-- Footer -->
@@ -254,36 +235,15 @@ func RenderHTML(data types.MoodResult, meta types.RepoMeta, delta *types.MoodDel
       %s
       %s
     })();
-
-    var sortState = {};
-    function sortTable(colIndex) {
-      var table = document.getElementById('churnTable');
-      var tbody = table.querySelector('tbody');
-      var rows = Array.from(tbody.querySelectorAll('tr'));
-      var asc = sortState[colIndex] = !sortState[colIndex];
-      rows.sort(function(a, b) {
-        var aVal = a.children[colIndex].textContent.trim();
-        var bVal = b.children[colIndex].textContent.trim();
-        var aNum = parseFloat(aVal.replace(/[^0-9.-]/g, ''));
-        var bNum = parseFloat(bVal.replace(/[^0-9.-]/g, ''));
-        if (!isNaN(aNum) && !isNaN(bNum)) {
-          return asc ? aNum - bNum : bNum - aNum;
-        }
-        return asc ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
-      });
-      rows.forEach(function(row) {
-        tbody.appendChild(row);
-      });
-    }
   </script>
 </body>
 </html>`,
 		escapeHTML(meta.RepoName),
-		buildCSS(mc),
+		buildCSS(),
 		limitedBanner,
-		mc.Emoji,
-		capitalize(string(data.Mood)), deltaHTML,
-		data.CompositeScore,
+		data.CompositeScore, deltaHTML,
+		bandClass(data.CompositeScore), bandLabel(data.CompositeScore),
+		clampScore(data.CompositeScore),
 		strings.ToUpper(escapeHTML(meta.RepoName)), meta.WindowDays,
 		formatDateShort2(meta.WindowStart), formatDateShort2(meta.WindowEnd),
 		meta.AnalyzedCommits,
@@ -298,14 +258,9 @@ func RenderHTML(data types.MoodResult, meta types.RepoMeta, delta *types.MoodDel
 		renderModulesSection(data.Signals.Modules.Modules, modulesHTML),
 		renderHotspotsSection(data.Signals.Hotspots.Hotspots, hotspotsHTML),
 		bugWhyHTML,
-		data.Signals.Authors.TotalAuthors,
-		fmt1(data.Signals.Authors.WeekendNightPct),
-		fmt1(data.Signals.Authors.BusFactorTop1Pct),
-		fmt1(data.Signals.Authors.NewContributorChurnPct),
-		authorsHTML,
-		driftHTML,
 		churnRows,
 		coveragePanel,
+		renderContributorsSection(data.Signals.Authors, data.Signals.AuthorDrift, data.Signals.Standards.ConventionalCommits),
 		formatDateLong(meta.GeneratedAt),
 		formatDateShort2(meta.WindowStart), formatDateShort2(meta.WindowEnd),
 		breakdownJS, freqJS, timelineJS, bugJS, coverageInit, trendInit,
@@ -326,19 +281,40 @@ func MoodEmoji(mood string) string {
 	return "?"
 }
 
-type moodConfigT struct {
-	Accent, Glow, Emoji string
+// bandClass is the CSS suffix for the score's band (steady/active/volatile).
+// Mirrors the same 0-40 / 41-70 / 71-100 thresholds as moodFromScore.
+func bandClass(score int) string {
+	switch {
+	case score <= 40:
+		return "steady"
+	case score <= 70:
+		return "active"
+	default:
+		return "volatile"
+	}
 }
 
-func moodConfig(m types.MoodLabel) moodConfigT {
-	switch m {
-	case types.MoodCalm:
-		return moodConfigT{Accent: "#22d3ee", Glow: "rgba(34, 211, 238, 0.35)", Emoji: "\U0001F60C"}
-	case types.MoodAnxious:
-		return moodConfigT{Accent: "#fbbf24", Glow: "rgba(251, 191, 36, 0.32)", Emoji: "\U0001F62C"}
+// bandLabel is the human-readable band name shown next to the score.
+func bandLabel(score int) string {
+	switch bandClass(score) {
+	case "steady":
+		return "Steady"
+	case "active":
+		return "Active"
 	default:
-		return moodConfigT{Accent: "#f43f5e", Glow: "rgba(244, 63, 94, 0.38)", Emoji: "\U0001F525"}
+		return "Volatile"
 	}
+}
+
+// clampScore keeps the bar marker inside the track on edge cases.
+func clampScore(score int) int {
+	if score < 0 {
+		return 0
+	}
+	if score > 100 {
+		return 100
+	}
+	return score
 }
 
 func renderNarrative(bullets []types.NarrativeBullet) string {
@@ -530,109 +506,198 @@ func renderHotspotDetail(h types.HotspotEntry) string {
 	return sb.String()
 }
 
-func renderAuthors(authors []types.AuthorEntry) string {
-	if len(authors) == 0 {
-		return `<div style="color:var(--text-dim);font-size:13px">No author data.</div>`
+// renderContributorsSection is the bottom-of-report Contributors explorer.
+// One drillable row per contributor in the window, sorted by lines-changed
+// desc, scrollable when the list grows long. Folds in:
+//   - the mini-stats header (distinct authors, weekend-night %, top share, new LOC %)
+//   - a per-row "Worth a 1:1" alert/watch pill when that contributor has any baseline drift
+//   - per-contributor drill-down with stats, drift detail, conventional-commit %, top files
+//
+// Designed so a manager can scan the list to spot patterns AND an engineer
+// can find themselves and click in for their own slice — replacing the
+// removed --me banner with inline self-service.
+func renderContributorsSection(authors types.AuthorSignal, drift types.AuthorDriftSignal, cc types.ConventionalCommitsResult) string {
+	if len(authors.Contributors) == 0 {
+		return ""
 	}
-	var sb strings.Builder
-	sb.WriteString(`<div class="author-row head">
-    <div>Author</div>
-    <div style="text-align:right">Commits</div>
-    <div style="text-align:right">LOC</div>
-    <div style="text-align:right">Wknd/night</div>
-  </div>`)
-	for _, a := range authors {
+
+	// Lookup tables so each row can pull its drift / cc entry in O(1).
+	driftByEmail := map[string]types.AuthorDrift{}
+	for _, d := range drift.Authors {
+		driftByEmail[strings.ToLower(d.Email)] = d
+	}
+	ccByEmail := map[string]types.AuthorComplianceEntry{}
+	for _, c := range cc.PerAuthor {
+		ccByEmail[strings.ToLower(c.Email)] = c
+	}
+
+	miniStats := fmt.Sprintf(`<div class="mini-stats">
+        <div><div class="val">%d</div><div class="lbl">Distinct</div></div>
+        <div><div class="val">%s%%</div><div class="lbl">Weekend/night</div></div>
+        <div><div class="val">%s%%</div><div class="lbl">Top author share</div></div>
+        <div><div class="val">%s%%</div><div class="lbl">LOC by new</div></div>
+      </div>`,
+		authors.TotalAuthors,
+		fmt1(authors.WeekendNightPct),
+		fmt1(authors.BusFactorTop1Pct),
+		fmt1(authors.NewContributorChurnPct))
+
+	var rows strings.Builder
+	for _, a := range authors.Contributors {
+		emailLower := strings.ToLower(a.Email)
+		d, hasDrift := driftByEmail[emailLower]
+		c, hasCC := ccByEmail[emailLower]
+
+		// Pill on the summary row indicates whether this person crossed
+		// any drift threshold in the current window. Severity is the
+		// max across all their flags.
+		alertPill := ""
+		if hasDrift {
+			sev := highestDriftSeverity(d.Flags)
+			alertPill = fmt.Sprintf(`<span class="drift-pill drift-%s">1:1</span>`, sev)
+		}
 		newTag := ""
 		if a.IsNew {
 			newTag = `<span class="new-tag">NEW</span>`
 		}
-		wnColor := "var(--text-faint)"
-		if a.WeekendNightCommits > 0 {
-			wnColor = "var(--anxious)"
+		wnPct := 0.0
+		if a.Commits > 0 {
+			wnPct = float64(a.WeekendNightCommits) / float64(a.Commits) * 100
 		}
-		fmt.Fprintf(&sb, `<div class="author-row">
-      <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-        <span style="color:var(--text)">%s</span>%s
-        <span class="author-email">%s</span>
-      </div>
-      <div style="text-align:right;font-family:'JetBrains Mono',monospace;color:var(--text-dim)">%d</div>
-      <div style="text-align:right;font-family:'JetBrains Mono',monospace;color:var(--text-dim)">%s</div>
-      <div style="text-align:right;font-family:'JetBrains Mono',monospace;color:%s">%d</div>
-    </div>`, escapeHTML(a.Name), newTag, escapeHTML(a.Email),
-			a.Commits, formatThousands(a.LinesChanged),
-			wnColor, a.WeekendNightCommits)
+
+		fmt.Fprintf(&rows, `<details class="contrib-item">
+      <summary class="row contrib-row" data-email="%s">
+        <div class="chevron">&#x25B6;</div>
+        <div class="contrib-name-cell">
+          <span class="contrib-name">%s</span>%s
+          <span class="contrib-email">%s</span>
+        </div>
+        <div style="text-align:right;font-family:'JetBrains Mono',monospace;color:var(--text-dim)">%d</div>
+        <div style="text-align:right;font-family:'JetBrains Mono',monospace;color:var(--text-dim)">%s</div>
+        <div style="text-align:right;font-family:'JetBrains Mono',monospace;color:var(--text-faint)">%.0f%%</div>
+        <div style="text-align:right">%s</div>
+      </summary>
+      %s
+    </details>`,
+			escapeHTML(emailLower),
+			escapeHTML(a.Name), newTag, escapeHTML(a.Email),
+			a.Commits, formatThousands(a.LinesChanged), wnPct,
+			alertPill,
+			renderContributorDetail(a, hasDrift, d, hasCC, c, drift.BaselineDays))
 	}
+
+	return fmt.Sprintf(`<div class="card" style="margin-bottom:24px">
+      <h2>Contributors <span class="sub">&middot; click any row to drill in &middot; sorted by LOC</span></h2>
+      %s
+      <div class="row head contrib-head">
+        <div></div>
+        <div>Contributor</div>
+        <div style="text-align:right">Commits</div>
+        <div style="text-align:right">LOC</div>
+        <div style="text-align:right">Wknd/night</div>
+        <div style="text-align:right">Watch?</div>
+      </div>
+      <div class="contributors-list">
+        %s
+      </div>
+    </div>`, miniStats, rows.String())
+}
+
+// renderContributorDetail builds the expanded panel for one contributor.
+// Lays down: stats grid → drift detail (or no-flag note) → conventional-commit
+// compliance bar → top files they touched.
+func renderContributorDetail(a types.AuthorEntry, hasDrift bool, d types.AuthorDrift, hasCC bool, c types.AuthorComplianceEntry, baselineDays int) string {
+	var sb strings.Builder
+	wnPct := 0.0
+	if a.Commits > 0 {
+		wnPct = float64(a.WeekendNightCommits) / float64(a.Commits) * 100
+	}
+
+	fmt.Fprintf(&sb, `<div class="hotspot-detail"><div class="detail-meta">
+    <span>Commits <b>%d</b></span>
+    <span>LOC <b>%s</b></span>
+    <span>Weekend/night <b>%d (%.0f%%)</b></span>
+    <span>First seen <b>%s</b></span>
+  </div>`,
+		a.Commits, formatThousands(a.LinesChanged), a.WeekendNightCommits, wnPct, a.FirstSeen)
+
+	// Drift card, if flagged.
+	if hasDrift {
+		fmt.Fprintf(&sb, `<div class="detail-title">Worth a 1:1 &middot; vs their %d-day baseline</div>`, baselineDays)
+		sb.WriteString(`<div class="drift-card">`)
+		fmt.Fprintf(&sb, `<div class="drift-stats" style="margin-bottom:8px">
+        <span title="commits/week now vs baseline">%.1f / %.1f cmt/wk</span>
+        <span title="weekend or night-hour share now vs baseline">%.0f%% / %.0f%% off-hours</span>
+        <span title="bug-tier share of their commits now vs baseline">%.0f%% / %.0f%% fix-mix</span>
+      </div>`,
+			d.CommitsPerWeekCurrent, d.CommitsPerWeekBaseline,
+			d.WeekendNightCurrent, d.WeekendNightBaseline,
+			d.FixRatioCurrent, d.FixRatioBaseline)
+		sb.WriteString(`<ul class="drift-flags">`)
+		for _, f := range d.Flags {
+			fmt.Fprintf(&sb, `<li class="drift-flag drift-%s"><span class="drift-pill drift-%s">%s</span><span>%s</span></li>`,
+				f.Severity, f.Severity, escapeHTML(strings.ToUpper(f.Severity)), escapeHTML(f.Text))
+		}
+		sb.WriteString(`</ul></div>`)
+	} else if baselineDays > 0 {
+		sb.WriteString(`<div class="detail-title">Baseline drift</div><div style="color:var(--text-faint);font-size:12px">No flags this window — their cadence, off-hours load, and fix-vs-feature mix all stayed within their own baseline.</div>`)
+	}
+
+	// Conventional-commit compliance bar.
+	if hasCC {
+		barColor := pctColor2(c.CompliancePct)
+		fmt.Fprintf(&sb, `<div class="detail-title">Conventional-commit compliance</div>
+      <div class="contrib-cc-row">
+        <span class="std-author-bar"><span style="width:%.0f%%;background:%s"></span></span>
+        <span class="std-author-pct">%.0f%% <span class="dim">(%d/%d)</span></span>
+      </div>`,
+			c.CompliancePct, barColor,
+			c.CompliancePct, c.Compliant, c.Total)
+	}
+
+	// Top files they touched.
+	if len(a.TopFiles) > 0 {
+		fmt.Fprintf(&sb, `<div class="detail-title">Most-touched files (%d shown)</div><ul class="contrib-files">`, len(a.TopFiles))
+		for _, f := range a.TopFiles {
+			fmt.Fprintf(&sb, `<li>
+          <code title="%s">%s</code>
+          <span class="contrib-file-stats">%d commits · <span class="added">+%d</span> <span class="removed">-%d</span></span>
+        </li>`,
+				escapeHTML(f.Path), escapeHTML(shorten(f.Path, 60)),
+				f.Commits, f.Added, f.Removed)
+		}
+		sb.WriteString(`</ul>`)
+	}
+
+	sb.WriteString(`</div>`)
 	return sb.String()
 }
 
-// renderAuthorDrift produces the "Worth a 1:1" Plank-1 card. Only renders
-// when at least one contributor has a flagged drift; otherwise emits an
-// empty (and visually clean) "no drift" card so users know the analysis
-// ran and didn't surface anything.
-func renderAuthorDrift(d types.AuthorDriftSignal) string {
-	if d.CurrentDays == 0 && d.BaselineDays == 0 {
-		return "" // signal not populated (e.g. fixture without drift) — render nothing
-	}
-	if len(d.Authors) == 0 {
-		return fmt.Sprintf(`<div class="card" style="margin-bottom:24px">
-      <h2>Worth a 1:1 <span class="section-sub">&middot; per-author drift vs %d-day baseline</span></h2>
-      <p style="color:var(--text-dim);font-size:13px;margin:0">
-        No contributors crossed the drift thresholds in the current %d-day window.
-        Each person is compared against <em>their own</em> rolling baseline &mdash;
-        cards here only appear when cadence, off-hours load, or fix-vs-feature mix
-        moves meaningfully against that baseline (and absolute volume is non-trivial).
-      </p>
-    </div>`, d.BaselineDays, d.CurrentDays)
-	}
-
-	var cards strings.Builder
-	for _, a := range d.Authors {
-		var flagsHTML strings.Builder
-		for _, f := range a.Flags {
-			fmt.Fprintf(&flagsHTML, `<li class="drift-flag drift-%s"><span class="drift-pill drift-%s">%s</span><span>%s</span></li>`,
-				f.Severity, f.Severity, escapeHTML(strings.ToUpper(f.Severity)), escapeHTML(f.Text))
+func highestDriftSeverity(flags []types.DriftFlag) string {
+	rank := map[string]int{"alert": 3, "watch": 2, "info": 1}
+	bestSev := ""
+	best := 0
+	for _, f := range flags {
+		if r := rank[f.Severity]; r > best {
+			best = r
+			bestSev = f.Severity
 		}
-		fmt.Fprintf(&cards, `<div class="drift-card">
-      <div class="drift-head">
-        <div class="drift-author">
-          <span class="drift-name">%s</span>
-          <span class="drift-email">%s</span>
-        </div>
-        <div class="drift-stats">
-          <span title="commits/week now vs baseline">%.1f / %.1f cmt/wk</span>
-          <span title="weekend or night-hour share now vs baseline">%.0f%% / %.0f%% off-hours</span>
-          <span title="bug-tier (chaos+normal+routine) share of their commits now vs baseline">%.0f%% / %.0f%% fix-mix</span>
-        </div>
-      </div>
-      <ul class="drift-flags">%s</ul>
-    </div>`,
-			escapeHTML(a.Name),
-			escapeHTML(a.Email),
-			a.CommitsPerWeekCurrent, a.CommitsPerWeekBaseline,
-			a.WeekendNightCurrent, a.WeekendNightBaseline,
-			a.FixRatioCurrent, a.FixRatioBaseline,
-			flagsHTML.String(),
-		)
 	}
-	return fmt.Sprintf(`<div class="card" style="margin-bottom:24px">
-      <h2>Worth a 1:1 <span class="section-sub">&middot; per-author drift vs %d-day baseline</span></h2>
-      <p style="color:var(--text-dim);font-size:12.5px;margin:0 0 14px 0">
-        Each card compares one contributor against <em>their own</em> prior pattern &mdash;
-        not against the team. These are observations to discuss, not scores to act on.
-      </p>
-      %s
-    </div>`, d.BaselineDays, cards.String())
+	if bestSev == "" {
+		return "info"
+	}
+	return bestSev
 }
 
 // renderStandards is the Plank-2 deterministic-standards card. Two
-// sub-sections: Conventional-commit compliance and test-file colocation.
+// sub-sections: Conventional-commit compliance and test density.
 // Both render with the same coaching framing — observation, not score.
 func renderStandards(s types.StandardsSignal) string {
 	if s.Type == "" {
 		return ""
 	}
 	cc := renderConventionalCommits(s.ConventionalCommits)
-	tc := renderTestColocation(s.TestColocation)
+	tc := renderTestDensity(s.TestDensity)
 	if cc == "" && tc == "" {
 		return ""
 	}
@@ -712,11 +777,11 @@ func conditionalNonCompliantPanel(samples string) string {
       </details>`, samples)
 }
 
-func renderTestColocation(c types.TestColocationResult) string {
+func renderTestDensity(c types.TestDensityResult) string {
 	if c.SourceFiles == 0 {
 		return ""
 	}
-	pctColor := pctColor(c.CoveragePct)
+	pctColor := pctColor(c.DensityPct)
 
 	var langPills strings.Builder
 	for _, l := range c.Languages {
@@ -725,46 +790,36 @@ func renderTestColocation(c types.TestColocationResult) string {
 
 	var perModule strings.Builder
 	for _, m := range c.PerModule {
-		barColor := pctColor2(m.CoveragePct)
+		barColor := pctColor2(m.DensityPct)
+		// Bar width caps at 100%% visually; the numeric label shows the true value (can exceed 100%%).
+		barWidth := m.DensityPct
+		if barWidth > 100 {
+			barWidth = 100
+		}
 		fmt.Fprintf(&perModule, `<li class="std-author-row">
       <span class="std-author-name">%s</span>
       <span class="std-author-bar"><span style="width:%.0f%%;background:%s"></span></span>
       <span class="std-author-pct">%.0f%% <span class="dim">(%d/%d)</span></span>
     </li>`,
 			escapeHTML(m.Module),
-			m.CoveragePct, barColor,
-			m.CoveragePct, m.Colocated, m.SourceFiles,
+			barWidth, barColor,
+			m.DensityPct, m.TestFiles, m.SourceFiles,
 		)
-	}
-
-	var missing strings.Builder
-	for _, f := range c.MissingSamples {
-		fmt.Fprintf(&missing, `<li><code>%s</code></li>`, escapeHTML(f))
-	}
-
-	missingPanel := ""
-	if missing.Len() > 0 {
-		missingPanel = fmt.Sprintf(`<details class="std-samples">
-        <summary><span class="chevron">&#x25B6;</span> source files missing a sibling test (sample)</summary>
-        <ul>%s</ul>
-      </details>`, missing.String())
 	}
 
 	return fmt.Sprintf(`<div class="standards-card">
       <div class="std-head">
-        <div class="std-title">Test-file colocation %s</div>
+        <div class="std-title">Test density %s</div>
         <div class="std-pct" style="color:%s">%.1f%%</div>
       </div>
-      <div class="std-sub">%d of %d source files have a sibling test file at HEAD.</div>
-      <div class="std-section-h">Worst-covered modules (≥5 source files)</div>
+      <div class="std-sub">%d test files vs %d source files (ratio, not coverage). Catches "does this module have tests at all"; filename matching deliberately avoided.</div>
+      <div class="std-section-h">Worst-covered modules (≥5 source files, sorted lowest first)</div>
       <ul class="std-author-list">%s</ul>
-      %s
     </div>`,
 		langPills.String(),
-		pctColor, c.CoveragePct,
-		c.Colocated, c.SourceFiles,
+		pctColor, c.DensityPct,
+		c.TestFiles, c.SourceFiles,
 		perModule.String(),
-		missingPanel,
 	)
 }
 
@@ -947,8 +1002,19 @@ func renderHotspotsSection(hotspots []types.HotspotEntry, inner string) string {
     `, inner)
 }
 
+// renderChurnRows produces the Top Churned Files list as a `<details>`
+// drillable list (Plank 3): each file is collapsed by default, expand
+// to see top authors and the most-recent commits touching it.
 func renderChurnRows(entries []types.ChurnEntry) string {
 	var sb strings.Builder
+	sb.WriteString(`<div class="row head churn-head">
+    <div></div>
+    <div>File</div>
+    <div style="text-align:right">Added</div>
+    <div style="text-align:right">Removed</div>
+    <div style="text-align:right">Total</div>
+    <div style="text-align:center">Ratio</div>
+  </div>`)
 	for _, f := range entries {
 		pillClass := "ratio-low"
 		if f.Ratio > 2.0 {
@@ -964,16 +1030,79 @@ func renderChurnRows(entries []types.ChurnEntry) string {
 		if f.Rewritten {
 			rewrittenTag = ` <span class="rewritten-tag" title="Raw churn ratio > 5× — file was effectively rewritten (or generated)">rewritten</span>`
 		}
-		fmt.Fprintf(&sb, `<tr>
-      <td style="font-family:'JetBrains Mono',monospace" title="%s">%s%s</td>
-      <td style="text-align:right"><span class="added">+%d</span></td>
-      <td style="text-align:right"><span class="removed">-%d</span></td>
-      <td style="text-align:right;font-family:'JetBrains Mono',monospace">%d</td>
-      <td style="text-align:center"><span class="ratio-pill %s">%.1f×</span></td>
-    </tr>
-`, escapeHTML(f.Path), escapeHTML(truncPath), rewrittenTag,
-			f.Added, f.Removed, f.Added+f.Removed, pillClass, f.Ratio)
+		fmt.Fprintf(&sb, `<details class="churn-item">
+      <summary class="row churn-row">
+        <div class="chevron">&#x25B6;</div>
+        <div class="path" title="%s" style="font-family:'JetBrains Mono',monospace">%s%s</div>
+        <div style="text-align:right"><span class="added">+%d</span></div>
+        <div style="text-align:right"><span class="removed">-%d</span></div>
+        <div style="text-align:right;font-family:'JetBrains Mono',monospace;color:var(--text-dim)">%d</div>
+        <div style="text-align:center"><span class="ratio-pill %s">%.1f×</span></div>
+      </summary>
+      %s
+    </details>`,
+			escapeHTML(f.Path), escapeHTML(truncPath), rewrittenTag,
+			f.Added, f.Removed, f.Added+f.Removed, pillClass, f.Ratio,
+			renderChurnDetail(f))
 	}
+	return sb.String()
+}
+
+// renderChurnDetail builds the expanded panel for one churn row. Mirrors
+// renderHotspotDetail but without the recommendations block (those are
+// hotspot-specific) and shows ALL recent commits, not just bug-tier.
+func renderChurnDetail(f types.ChurnEntry) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, `<div class="hotspot-detail"><div class="detail-meta">
+    <span>Total churn <b>%d</b></span>
+    <span>Distinct authors <b>%d</b></span>`,
+		f.Added+f.Removed, len(f.TopAuthorsOfFile))
+	if f.TotalCommits > 0 {
+		fmt.Fprintf(&sb, `<span>Touching commits <b>%d</b></span>`, f.TotalCommits)
+	}
+	if f.LastTouched != "" {
+		fmt.Fprintf(&sb, `<span>Last touched <b>%s</b></span>`, f.LastTouched)
+	}
+	sb.WriteString("</div>")
+
+	if len(f.TopAuthorsOfFile) > 0 {
+		sb.WriteString(`<div class="detail-title">Top authors of this file</div><div class="detail-authors">`)
+		for _, a := range f.TopAuthorsOfFile {
+			fmt.Fprintf(&sb, `<span class="author-chip">%s<span class="count">%d</span></span>`, escapeHTML(a.Name), a.Commits)
+		}
+		sb.WriteString(`</div>`)
+	}
+
+	if len(f.RecentCommits) > 0 {
+		fmt.Fprintf(&sb, `<div class="detail-title">Recent commits touching this file (%d newest)</div><ul class="commit-list">`, len(f.RecentCommits))
+		for _, c := range f.RecentCommits {
+			tierClass := ""
+			tierLabel := c.Tier
+			switch c.Tier {
+			case "chaos":
+				tierClass = "tier-chaos"
+			case "normal":
+				tierClass = "tier-normal"
+			case "routine":
+				tierClass = "tier-routine"
+			default:
+				tierClass = "tier-none"
+				tierLabel = "—"
+			}
+			fmt.Fprintf(&sb, `<li>
+         <span class="commit-tier %s">%s</span>
+         <span class="commit-hash">%s</span>
+         <span class="commit-date">%s · <span class="commit-author" title="%s">%s</span></span>
+         <span class="commit-message" title="%s">%s</span>
+       </li>`, tierClass, tierLabel,
+				escapeHTML(c.Hash),
+				c.Date, escapeHTML(c.Author), escapeHTML(shorten(c.Author, 14)),
+				escapeHTML(c.Message), escapeHTML(c.Message))
+		}
+		sb.WriteString("</ul>")
+	}
+
+	sb.WriteString(`</div>`)
 	return sb.String()
 }
 

@@ -187,7 +187,7 @@ func UIMoodResult() types.MoodResult {
 				BusFactorTop1Pct:       32,
 				BusFactorTop3Pct:       71,
 				NewContributorChurnPct: 8.3,
-				TopAuthors: []types.AuthorEntry{
+				Contributors: []types.AuthorEntry{
 					{Name: "Alice Chen", Email: "alice@example.com", Commits: 28, LinesChanged: 1400, WeekendNightCommits: 4, FirstSeen: "2026-01-22", IsNew: false},
 					{Name: "Bob Martinez", Email: "bob@example.com", Commits: 18, LinesChanged: 900, WeekendNightCommits: 1, FirstSeen: "2026-01-28", IsNew: false},
 				},

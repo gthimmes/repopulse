@@ -71,11 +71,15 @@ type ChurnSignal struct {
 }
 
 type ChurnEntry struct {
-	Path      string  `json:"path"`
-	Added     int     `json:"added"`
-	Removed   int     `json:"removed"`
-	Ratio     float64 `json:"ratio"`
-	Rewritten bool    `json:"rewritten"`
+	Path             string              `json:"path"`
+	Added            int                 `json:"added"`
+	Removed          int                 `json:"removed"`
+	Ratio            float64             `json:"ratio"`
+	Rewritten        bool                `json:"rewritten"`
+	TotalCommits     int                 `json:"totalCommits,omitempty"`
+	LastTouched      string              `json:"lastTouched,omitempty"`
+	TopAuthorsOfFile []HotspotFileAuthor `json:"topAuthorsOfFile,omitempty"`
+	RecentCommits    []HotspotCommit     `json:"recentCommits,omitempty"`
 }
 
 type BugSignal struct {
@@ -180,17 +184,31 @@ type AuthorSignal struct {
 	BusFactorTop1Pct       float64       `json:"busFactorTop1Pct"`
 	BusFactorTop3Pct       float64       `json:"busFactorTop3Pct"`
 	NewContributorChurnPct float64       `json:"newContributorChurnPct"`
-	TopAuthors             []AuthorEntry `json:"topAuthors"`
+	// Contributors is the FULL list (every author who appears in the
+	// window), sorted by lines-changed descending. Powers the bottom
+	// Contributors explorer. Populated even if AuthorEntry.TopFiles
+	// would be empty (e.g. the author touched only excluded paths).
+	Contributors []AuthorEntry `json:"contributors"`
 }
 
 type AuthorEntry struct {
-	Name                string `json:"name"`
-	Email               string `json:"email"`
-	Commits             int    `json:"commits"`
-	LinesChanged        int    `json:"linesChanged"`
-	WeekendNightCommits int    `json:"weekendNightCommits"`
-	FirstSeen           string `json:"firstSeen"`
-	IsNew               bool   `json:"isNew"`
+	Name                string             `json:"name"`
+	Email               string             `json:"email"`
+	Commits             int                `json:"commits"`
+	LinesChanged        int                `json:"linesChanged"`
+	WeekendNightCommits int                `json:"weekendNightCommits"`
+	FirstSeen           string             `json:"firstSeen"`
+	IsNew               bool               `json:"isNew"`
+	TopFiles            []AuthorFileTouch  `json:"topFiles,omitempty"`
+}
+
+// AuthorFileTouch is one of an author's most-touched files in the window,
+// surfaced inside their drill-down on the Contributors explorer.
+type AuthorFileTouch struct {
+	Path    string `json:"path"`
+	Commits int    `json:"commits"`
+	Added   int    `json:"added"`
+	Removed int    `json:"removed"`
 }
 
 // --- Plank 1: per-author baseline drift ---
@@ -229,7 +247,7 @@ type DriftFlag struct {
 type StandardsSignal struct {
 	Type                string                    `json:"type"` // "standards"
 	ConventionalCommits ConventionalCommitsResult `json:"conventionalCommits"`
-	TestColocation      TestColocationResult      `json:"testColocation"`
+	TestDensity         TestDensityResult         `json:"testDensity"`
 }
 
 type ConventionalCommitsResult struct {
@@ -254,20 +272,28 @@ type NonCompliantCommit struct {
 	Subject string `json:"subject"`
 }
 
-type TestColocationResult struct {
-	Languages      []string                `json:"languages"` // detected source extensions, e.g. [".kt", ".ts"]
-	SourceFiles    int                     `json:"sourceFiles"`
-	Colocated      int                     `json:"colocated"`
-	CoveragePct    float64                 `json:"coveragePct"`
-	PerModule      []ModuleColocationEntry `json:"perModule"`
-	MissingSamples []string                `json:"missingSamples"`
+// TestDensityResult measures test-to-source file ratio per language and
+// per module. Replaced the earlier "test-file colocation" metric because
+// that one required filename correspondence (FooController.kt ↔
+// FooControllerTest.kt), which under-reports any team that splits tests
+// by action, uses integration-test suites, or otherwise doesn't name
+// tests after single source classes. Density asks the simpler question:
+// "does this module have tests at all, and roughly how much?"
+type TestDensityResult struct {
+	Languages   []string             `json:"languages"` // detected source extensions, e.g. [".kt", ".ts"]
+	SourceFiles int                  `json:"sourceFiles"`
+	TestFiles   int                  `json:"testFiles"`
+	// DensityPct = TestFiles / SourceFiles * 100. Can exceed 100% when a
+	// codebase has more test files than source files (healthy!).
+	DensityPct float64              `json:"densityPct"`
+	PerModule  []ModuleDensityEntry `json:"perModule"`
 }
 
-type ModuleColocationEntry struct {
+type ModuleDensityEntry struct {
 	Module      string  `json:"module"`
 	SourceFiles int     `json:"sourceFiles"`
-	Colocated   int     `json:"colocated"`
-	CoveragePct float64 `json:"coveragePct"`
+	TestFiles   int     `json:"testFiles"`
+	DensityPct  float64 `json:"densityPct"`
 }
 
 type DayBucket struct {

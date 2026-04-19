@@ -1,175 +1,158 @@
 package standards
 
 import (
-	"path"
 	"sort"
 	"strings"
 
 	"repopulse/internal/types"
 )
 
-// MaxMissingSamples caps how many "source-without-test" examples we
-// keep on hand for the report drill-down.
-const MaxMissingSamples = 25
-
-// MaxModulesShown caps the per-module breakdown — only the worst N
-// modules by colocation gap show up by default.
+// MaxModulesShown caps the per-module density breakdown.
 const MaxModulesShown = 12
 
-// langRule describes how a language locates its test sibling.
+// langRule recognises files for one language. Each file under a
+// matching language is classified as either a SOURCE or a TEST:
 //
-//	srcExt:    file extension that identifies a source file (".kt", ".ts", ...)
-//	skipSubstr: don't classify as source if the path already contains any of
-//	            these substrings (e.g. ".test.", "/test/", "_test.go") —
-//	            keeps test files themselves out of the denominator.
-//	hasTest:   given the source path AND the full file set, returns true if
-//	            the test sibling exists.
+//	isTest(path) → true  : counted toward test files for the module
+//	isTest(path) → false : counted toward source files
+//
+// Density is the ratio of test files to source files — a more forgiving
+// signal than filename-matching colocation because many teams organise
+// tests by action, behaviour, or integration scenario rather than one
+// test file per source class.
 type langRule struct {
-	srcExt     string
-	skipSubstr []string
-	hasTest    func(srcPath string, all map[string]struct{}) bool
+	ext    string
+	isTest func(path string) bool
 }
 
-var defaultRules = []langRule{
-	{
-		srcExt:     ".go",
-		skipSubstr: []string{"_test.go"},
-		hasTest: func(p string, all map[string]struct{}) bool {
-			testPath := strings.TrimSuffix(p, ".go") + "_test.go"
-			_, ok := all[testPath]
-			return ok
-		},
-	},
-	{
-		srcExt:     ".kt",
-		skipSubstr: []string{"Test.kt", "Tests.kt", "/test/", "/androidTest/", "/integrationTest/"},
-		hasTest: func(p string, all map[string]struct{}) bool {
-			// Sibling: FooTest.kt next to Foo.kt
-			base := strings.TrimSuffix(path.Base(p), ".kt")
-			dir := path.Dir(p)
-			if _, ok := all[path.Join(dir, base+"Test.kt")]; ok {
-				return true
-			}
-			if _, ok := all[path.Join(dir, base+"Tests.kt")]; ok {
-				return true
-			}
-			// Mirror layout: src/main/kotlin/x/y/Foo.kt → src/test/kotlin/x/y/FooTest.kt
-			mirrored := strings.Replace(p, "/main/", "/test/", 1)
-			mirrored = strings.TrimSuffix(mirrored, ".kt") + "Test.kt"
-			if _, ok := all[mirrored]; ok {
-				return true
-			}
-			return false
-		},
-	},
-	{
-		srcExt:     ".ts",
-		skipSubstr: []string{".test.ts", ".spec.ts", ".d.ts", "/__tests__/", "/test/", "/tests/"},
-		hasTest:    typeScriptHasTest,
-	},
-	{
-		srcExt:     ".tsx",
-		skipSubstr: []string{".test.tsx", ".spec.tsx", "/__tests__/", "/test/", "/tests/"},
-		hasTest:    typeScriptHasTest,
-	},
-	{
-		srcExt:     ".js",
-		skipSubstr: []string{".test.js", ".spec.js", "/__tests__/", "/test/", "/tests/"},
-		hasTest:    typeScriptHasTest,
-	},
-	{
-		srcExt:     ".jsx",
-		skipSubstr: []string{".test.jsx", ".spec.jsx", "/__tests__/", "/test/", "/tests/"},
-		hasTest:    typeScriptHasTest,
-	},
-	{
-		srcExt:     ".py",
-		skipSubstr: []string{"test_", "_test.py", "/tests/", "/test/"},
-		hasTest: func(p string, all map[string]struct{}) bool {
-			base := strings.TrimSuffix(path.Base(p), ".py")
-			dir := path.Dir(p)
-			candidates := []string{
-				path.Join(dir, "test_"+base+".py"),
-				path.Join(dir, base+"_test.py"),
-				path.Join(dir, "tests", "test_"+base+".py"),
-			}
-			for _, c := range candidates {
-				if _, ok := all[c]; ok {
-					return true
-				}
-			}
-			return false
-		},
-	},
-}
-
-// typeScriptHasTest covers the JS/TS/TSX/JSX family — sibling
-// foo.test.ts / foo.spec.ts / __tests__/foo.test.ts patterns.
-func typeScriptHasTest(p string, all map[string]struct{}) bool {
-	ext := path.Ext(p)
-	base := strings.TrimSuffix(path.Base(p), ext)
-	dir := path.Dir(p)
-	candidates := []string{
-		path.Join(dir, base+".test"+ext),
-		path.Join(dir, base+".spec"+ext),
-		path.Join(dir, "__tests__", base+".test"+ext),
-		path.Join(dir, "__tests__", base+".spec"+ext),
-	}
-	for _, c := range candidates {
-		if _, ok := all[c]; ok {
+func hasAnySubstr(p string, needles []string) bool {
+	for _, n := range needles {
+		if strings.Contains(p, n) {
 			return true
 		}
 	}
 	return false
 }
 
-// ComputeTestColocation walks the tracked file set, classifies sources
-// by language using defaultRules, and reports per-module + per-language
-// colocation coverage.
-func ComputeTestColocation(allFiles []string) types.TestColocationResult {
+var defaultRules = []langRule{
+	{
+		ext: ".go",
+		isTest: func(p string) bool {
+			return strings.HasSuffix(p, "_test.go")
+		},
+	},
+	{
+		ext: ".kt",
+		isTest: func(p string) bool {
+			// Filename-suffix shapes…
+			if strings.HasSuffix(p, "Test.kt") ||
+				strings.HasSuffix(p, "Tests.kt") ||
+				strings.HasSuffix(p, "Spec.kt") ||
+				strings.HasSuffix(p, "IT.kt") {
+				return true
+			}
+			// …OR anything under a conventional test source root.
+			// Catches helpers (TestHelper.kt, PtoFixtures.kt, etc.)
+			// that live alongside test classes.
+			return hasAnySubstr(p, []string{"/src/test/", "/src/androidTest/", "/src/integrationTest/", "/src/testFixtures/"})
+		},
+	},
+	{
+		ext: ".ts",
+		isTest: func(p string) bool {
+			if strings.HasSuffix(p, ".test.ts") || strings.HasSuffix(p, ".spec.ts") {
+				return true
+			}
+			if strings.HasSuffix(p, ".d.ts") {
+				// Type declaration file — skip entirely (not a test, not a source).
+				return false
+			}
+			return hasAnySubstr(p, []string{"/__tests__/", "/tests/", "/test/"})
+		},
+	},
+	{
+		ext: ".tsx",
+		isTest: func(p string) bool {
+			if strings.HasSuffix(p, ".test.tsx") || strings.HasSuffix(p, ".spec.tsx") {
+				return true
+			}
+			return hasAnySubstr(p, []string{"/__tests__/", "/tests/", "/test/"})
+		},
+	},
+	{
+		ext: ".js",
+		isTest: func(p string) bool {
+			if strings.HasSuffix(p, ".test.js") || strings.HasSuffix(p, ".spec.js") {
+				return true
+			}
+			return hasAnySubstr(p, []string{"/__tests__/", "/tests/", "/test/"})
+		},
+	},
+	{
+		ext: ".jsx",
+		isTest: func(p string) bool {
+			if strings.HasSuffix(p, ".test.jsx") || strings.HasSuffix(p, ".spec.jsx") {
+				return true
+			}
+			return hasAnySubstr(p, []string{"/__tests__/", "/tests/", "/test/"})
+		},
+	},
+	{
+		ext: ".py",
+		isTest: func(p string) bool {
+			base := lastSegment(p)
+			if strings.HasPrefix(base, "test_") || strings.HasSuffix(p, "_test.py") {
+				return true
+			}
+			return hasAnySubstr(p, []string{"/tests/", "/test/"})
+		},
+	},
+}
+
+// isSkippedExt excludes TypeScript declaration files — they're neither
+// source nor test.
+func isSkippedExt(p string) bool {
+	return strings.HasSuffix(p, ".d.ts")
+}
+
+// ComputeTestDensity calculates the test-to-source file ratio per
+// language and per module across the tracked file set. `allFiles` is
+// typically the output of `git ls-files` at HEAD.
+func ComputeTestDensity(allFiles []string) types.TestDensityResult {
 	if len(allFiles) == 0 {
-		return types.TestColocationResult{}
+		return types.TestDensityResult{}
 	}
 
-	all := make(map[string]struct{}, len(allFiles))
-	for _, f := range allFiles {
-		all[f] = struct{}{}
-	}
-
-	totalSrc, totalCoLoc := 0, 0
-	languages := map[string]struct{}{}
 	type modAgg struct {
-		src, coloc int
+		src, tests int
 	}
 	byModule := map[string]*modAgg{}
-	var missing []string
+	languages := map[string]struct{}{}
+	totalSrc, totalTests := 0, 0
 
 	for _, f := range allFiles {
+		if isSkippedExt(f) {
+			continue
+		}
 		rule, ok := matchRule(f)
 		if !ok {
 			continue
 		}
+		languages[rule.ext] = struct{}{}
 
-		// Classify whether this file IS a source file (not a test itself).
-		if isExcludedAsTest(f, rule) {
-			continue
-		}
-
-		languages[rule.srcExt] = struct{}{}
-		totalSrc++
 		mod := topLevelModule(f)
-		ma, ok := byModule[mod]
-		if !ok {
+		ma, exists := byModule[mod]
+		if !exists {
 			ma = &modAgg{}
 			byModule[mod] = ma
 		}
-		ma.src++
 
-		if rule.hasTest(f, all) {
-			totalCoLoc++
-			ma.coloc++
-		} else if len(missing) < MaxMissingSamples {
-			missing = append(missing, f)
+		if rule.isTest(f) {
+			ma.tests++
+			totalTests++
+		} else {
+			ma.src++
+			totalSrc++
 		}
 	}
 
@@ -179,24 +162,25 @@ func ComputeTestColocation(allFiles []string) types.TestColocationResult {
 	}
 	sort.Strings(langs)
 
-	mods := make([]types.ModuleColocationEntry, 0, len(byModule))
+	mods := make([]types.ModuleDensityEntry, 0, len(byModule))
 	for name, m := range byModule {
-		// Only surface modules with ≥5 source files; below that the % swings
-		// too much per file to mean anything.
+		// Need at least some source files to have a meaningful ratio.
+		// A module that's 100% tests (or 0 sources) gets hidden from
+		// the per-module breakdown; it's probably a test-only module.
 		if m.src < 5 {
 			continue
 		}
-		mods = append(mods, types.ModuleColocationEntry{
+		mods = append(mods, types.ModuleDensityEntry{
 			Module:      name,
 			SourceFiles: m.src,
-			Colocated:   m.coloc,
-			CoveragePct: round1(pct(m.coloc, m.src)),
+			TestFiles:   m.tests,
+			DensityPct:  round1(pct(m.tests, m.src)),
 		})
 	}
-	// Worst coverage first; ties by source-file count desc.
+	// Worst (lowest density) first; ties broken by source-file count desc.
 	sort.SliceStable(mods, func(i, j int) bool {
-		if mods[i].CoveragePct != mods[j].CoveragePct {
-			return mods[i].CoveragePct < mods[j].CoveragePct
+		if mods[i].DensityPct != mods[j].DensityPct {
+			return mods[i].DensityPct < mods[j].DensityPct
 		}
 		return mods[i].SourceFiles > mods[j].SourceFiles
 	})
@@ -204,32 +188,22 @@ func ComputeTestColocation(allFiles []string) types.TestColocationResult {
 		mods = mods[:MaxModulesShown]
 	}
 
-	return types.TestColocationResult{
-		Languages:      langs,
-		SourceFiles:    totalSrc,
-		Colocated:      totalCoLoc,
-		CoveragePct:    round1(pct(totalCoLoc, totalSrc)),
-		PerModule:      mods,
-		MissingSamples: missing,
+	return types.TestDensityResult{
+		Languages:   langs,
+		SourceFiles: totalSrc,
+		TestFiles:   totalTests,
+		DensityPct:  round1(pct(totalTests, totalSrc)),
+		PerModule:   mods,
 	}
 }
 
 func matchRule(p string) (langRule, bool) {
 	for _, r := range defaultRules {
-		if strings.HasSuffix(p, r.srcExt) {
+		if strings.HasSuffix(p, r.ext) {
 			return r, true
 		}
 	}
 	return langRule{}, false
-}
-
-func isExcludedAsTest(p string, r langRule) bool {
-	for _, s := range r.skipSubstr {
-		if strings.Contains(p, s) {
-			return true
-		}
-	}
-	return false
 }
 
 // topLevelModule returns the first path segment, which is what the
@@ -239,4 +213,11 @@ func topLevelModule(p string) string {
 		return p[:i]
 	}
 	return "(root)"
+}
+
+func lastSegment(p string) string {
+	if i := strings.LastIndexAny(p, "/\\"); i >= 0 {
+		return p[i+1:]
+	}
+	return p
 }

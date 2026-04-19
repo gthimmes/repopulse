@@ -17,20 +17,20 @@ import (
 func Generate(data types.MoodResult, meta types.RepoMeta) []types.NarrativeBullet {
 	bullets := []types.NarrativeBullet{}
 
-	// Overall mood
-	var moodKind string
+	// Overall repo pressure
+	var moodKind, bandLabel string
 	switch data.Mood {
 	case types.MoodCalm:
-		moodKind = "good"
+		moodKind, bandLabel = "good", "Steady"
 	case types.MoodAnxious:
-		moodKind = "warn"
+		moodKind, bandLabel = "warn", "Active"
 	default:
-		moodKind = "alert"
+		moodKind, bandLabel = "alert", "Volatile"
 	}
 	bullets = append(bullets, types.NarrativeBullet{
 		Kind: moodKind,
-		Text: fmt.Sprintf("Overall mood is %s (%d/100) across %d commits in the last %d days.",
-			data.Mood, data.CompositeScore, meta.AnalyzedCommits, meta.WindowDays),
+		Text: fmt.Sprintf("Repo pressure is %s (%d/100) across %d commits in the last %d days.",
+			bandLabel, data.CompositeScore, meta.AnalyzedCommits, meta.WindowDays),
 	})
 
 	// Top 3 hot modules
@@ -88,7 +88,7 @@ func Generate(data types.MoodResult, meta types.RepoMeta) []types.NarrativeBulle
 		}
 		bullets = append(bullets, types.NarrativeBullet{
 			Kind: "alert",
-			Text: fmt.Sprintf("%d %s reverted within a week of landing — a strong chaos signal.", n, noun),
+			Text: fmt.Sprintf("%d %s reverted within a week of landing — a strong regression signal.", n, noun),
 		})
 	}
 

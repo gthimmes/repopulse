@@ -51,7 +51,7 @@ func baseMoodResult() types.MoodResult {
 			Authors: types.AuthorSignal{
 				Type: "authors", Score: 40, TotalAuthors: 3,
 				WeekendNightPct: 0, BusFactorTop1Pct: 33, BusFactorTop3Pct: 100,
-				NewContributorChurnPct: 0, TopAuthors: []types.AuthorEntry{},
+				NewContributorChurnPct: 0, Contributors: []types.AuthorEntry{},
 			},
 		},
 		Narrative:       []types.NarrativeBullet{},
