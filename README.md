@@ -1,11 +1,11 @@
-# mood-ring 💍
+# repopulse 💍
 
 Visualize the "emotional state" of a Git repository as a self-contained HTML dashboard + shareable Markdown digest.
 
 No AI. No external APIs. Just git history + math. Single 4 MB binary.
 
 ```bash
-./mood-ring.exe /path/to/repo -open
+./repopulse.exe /path/to/repo -open
 ```
 
 ## What it produces
@@ -37,18 +37,51 @@ Two artifacts, written to `output/` by default:
 ## Usage
 
 ```
-mood-ring <repo-path> [options]
+repopulse <repo-path> [options]
 
 Options:
   -window <days>      Analysis window in days (default: 90)
-  -output <file>      Output HTML file (default: output/mood-report.html)
+  -output <file>      Output HTML file (default: output/repopulse-report.html)
   -open               Auto-open in browser after writing
   -since <date>       Start from date, e.g. "2024-01-01" or "3 months ago"
   -ignore <pattern>   Additional glob ignore pattern (repeatable)
   -json <file>        Also write a JSON snapshot (for later -compare)
   -compare <file>     Previous JSON snapshot to diff against
   -markdown <file>    Also write a Markdown digest
+  -no-snapshot        Skip the automatic .repopulse/snapshots/ entry
 ```
+
+## Configuration — `.repopulserc`
+
+Drop a `.repopulserc` JSON file at the root of the analyzed repo to tune
+ignore patterns and bug-tier keywords for your team's workflow.
+
+```json
+{
+  "ignore": [
+    "**/generated/**",
+    "**/proto/**"
+  ],
+  "bugKeywords": {
+    "chaos":   ["sev1", "sev2"],
+    "normal":  ["defect", "!workaround"],
+    "routine": ["rename", "cleanup"]
+  }
+}
+```
+
+- `ignore` — extra glob patterns, appended to the built-in default list
+  (lockfiles, `dist/`, `node_modules/`, minified bundles, etc.)
+- `bugKeywords` — per-tier lists that are **appended** to the defaults.
+  Prefix an entry with `!` to remove a default (e.g. `"!workaround"` drops
+  `workaround` from the normal tier). Built-in defaults live in
+  `internal/config/config.go:DefaultBugKeywords`.
+
+The classifier also respects Conventional-Commit prefixes: subjects
+starting with `feat:`, `chore:`, `docs:`, `style:`, `test:`, `refactor:`,
+`ci:`, `build:`, or `perf:` (with or without a `(scope)`) are **never**
+classified as bugs, regardless of body content. `fix:` and `revert:` are
+left alone and still flow through the keyword matcher.
 
 ## How mood is scored
 
@@ -74,8 +107,8 @@ Full signal math: see [SPEC.md](./SPEC.md).
 
 ```bash
 # Primary binary
-go build -o mood-ring.exe ./cmd/mood-ring         # Windows
-go build -o mood-ring ./cmd/mood-ring             # macOS / Linux
+go build -o repopulse.exe ./cmd/repopulse         # Windows
+go build -o repopulse ./cmd/repopulse             # macOS / Linux
 
 # Test fixture generator (required before running Playwright)
 go build -o fixture-gen.exe ./cmd/fixture-gen     # Windows
@@ -91,8 +124,8 @@ By default, reports go to `output/` (gitignored). The CLI auto-creates the paren
 ## Test
 
 ```bash
-go test ./internal/...       # 68 Go unit tests
-npx playwright test          # 26 Playwright end-to-end tests
+go test ./internal/...       # Go unit tests
+npx playwright test          # Playwright end-to-end tests
 ```
 
 Both suites are expected green. Playwright requires `fixture-gen` to be built first.
@@ -101,8 +134,9 @@ Both suites are expected green. Playwright requires `fixture-gen` to be built fi
 
 - ✅ **Phase 1 complete** — drill-downs, bug explainability, CODEOWNERS teams, recommendations, markdown digest
 - ✅ **Go port complete** — TypeScript fully removed; codebase is 100% Go
+- ✅ **Phase 2.1 + 2.2** — persistent snapshot store + trend charts in the report
+- ⏳ **Phase 2 remaining** — GitHub Action (2.3), threshold alerts (2.4)
 - ⏳ **Go port polish** (task #19) — `git show` parallelization, 1-commit off-by-one fix
-- 📋 **Phase 2 next** — snapshot store, trend charts, GitHub Action, threshold alerts
 
 Full context: see [ROADMAP.md](./ROADMAP.md) for where we've been and where we're going, and [CLAUDE.md](./CLAUDE.md) for developer-facing setup and architecture notes.
 

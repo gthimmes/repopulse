@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"mood-ring/internal/types"
+	"repopulse/internal/types"
 )
 
 // Unit separator between fields, record separator between commits.

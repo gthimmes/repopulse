@@ -3,7 +3,7 @@ package fixtures
 import (
 	"time"
 
-	"mood-ring/internal/types"
+	"repopulse/internal/types"
 )
 
 // UIHotspots — deterministic hotspot data used by the Playwright UI tests.

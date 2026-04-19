@@ -7,7 +7,7 @@ import (
 	"sort"
 	"time"
 
-	"mood-ring/internal/types"
+	"repopulse/internal/types"
 )
 
 // Each "Chart" function returns a JS object literal string ready to drop

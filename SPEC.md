@@ -4,7 +4,7 @@
 
 ## Overview
 
-`mood-ring` reads a local Git repository and outputs a self-contained HTML file plus optional Markdown digest visualizing the "emotional state" of the codebase over a configurable time window.
+`repopulse` reads a local Git repository and outputs a self-contained HTML file plus optional Markdown digest visualizing the "emotional state" of the codebase over a configurable time window.
 
 Mood is derived from **six signals**: commit frequency, file churn, bug ratio (tiered), authors, modules, hotspots. Coverage is a seventh optional signal.
 
@@ -355,7 +355,7 @@ Empty sections are omitted. `Score line` and footer always render.
 | Path is not a git repo | Exit 1: "No git repository found at ./path" |
 | Repo has 0 commits in window | Exit 1: "Repository has no commits in the analysis window" |
 | Repo has < 10 commits | Still generate, show banner, do not error |
-| `.moodringrc` parse fails | Warn to stderr, use defaults, continue |
+| `.repopulserc` parse fails | Warn to stderr, use defaults, continue |
 | Coverage file parse fails | Warn to stderr, skip coverage signal |
 | `git show HEAD:<path>` fails (deleted file) | Use 0 for line count (ratio goes to cap) |
 | CODEOWNERS missing | Silent — no chips rendered, no errors |

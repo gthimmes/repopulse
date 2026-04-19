@@ -1,5 +1,5 @@
 // Package config holds default ignore patterns + bug keyword tiers and
-// loads per-repo overrides from .moodringrc.
+// loads per-repo overrides from .repopulserc.
 package config
 
 import (
@@ -80,29 +80,29 @@ type BugKeywords struct {
 	Routine []string `json:"routine,omitempty"`
 }
 
-type MoodRingConfig struct {
+type RepopulseConfig struct {
 	Ignore      []string     `json:"ignore,omitempty"`
 	BugKeywords *BugKeywords `json:"bugKeywords,omitempty"`
 }
 
-// LoadConfig reads .moodringrc from the repo. Missing file → empty config.
-func LoadConfig(repoPath string) MoodRingConfig {
-	rcPath := filepath.Join(repoPath, ".moodringrc")
+// LoadConfig reads .repopulserc from the repo. Missing file → empty config.
+func LoadConfig(repoPath string) RepopulseConfig {
+	rcPath := filepath.Join(repoPath, ".repopulserc")
 	data, err := os.ReadFile(rcPath)
 	if err != nil {
-		return MoodRingConfig{}
+		return RepopulseConfig{}
 	}
-	var cfg MoodRingConfig
+	var cfg RepopulseConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to parse .moodringrc: %v\n", err)
-		return MoodRingConfig{}
+		fmt.Fprintf(os.Stderr, "Warning: failed to parse .repopulserc: %v\n", err)
+		return RepopulseConfig{}
 	}
 	return cfg
 }
 
 // BuildIgnorePredicate returns a func(path) bool that is true if the path
 // matches any of the combined default + repo-config + CLI ignore patterns.
-func BuildIgnorePredicate(cfg MoodRingConfig, cliIgnore []string) func(string) bool {
+func BuildIgnorePredicate(cfg RepopulseConfig, cliIgnore []string) func(string) bool {
 	patterns := append([]string{}, DefaultIgnorePatterns...)
 	patterns = append(patterns, cfg.Ignore...)
 	patterns = append(patterns, cliIgnore...)
@@ -119,27 +119,53 @@ func BuildIgnorePredicate(cfg MoodRingConfig, cliIgnore []string) func(string) b
 	}
 }
 
-// ResolvedBugKeywords merges repo config with defaults.
-func ResolvedBugKeywords(cfg MoodRingConfig) BugKeywords {
+// ResolvedBugKeywords merges repo config with defaults. Per-tier arrays in
+// `.repopulserc` are appended to the defaults rather than replacing them, so
+// a team can add a single house keyword without having to restate the full
+// list. To explicitly drop a default, prefix the entry with `!` (e.g.
+// `"!fix"` removes "fix" from the normal tier). Duplicates are collapsed.
+func ResolvedBugKeywords(cfg RepopulseConfig) BugKeywords {
 	out := BugKeywords{
-		Chaos:   DefaultBugKeywords.Chaos,
-		Normal:  DefaultBugKeywords.Normal,
-		Routine: DefaultBugKeywords.Routine,
+		Chaos:   append([]string{}, DefaultBugKeywords.Chaos...),
+		Normal:  append([]string{}, DefaultBugKeywords.Normal...),
+		Routine: append([]string{}, DefaultBugKeywords.Routine...),
 	}
 	if cfg.BugKeywords != nil {
-		if cfg.BugKeywords.Chaos != nil {
-			out.Chaos = cfg.BugKeywords.Chaos
-		}
-		if cfg.BugKeywords.Normal != nil {
-			out.Normal = cfg.BugKeywords.Normal
-		}
-		if cfg.BugKeywords.Routine != nil {
-			out.Routine = cfg.BugKeywords.Routine
-		}
+		out.Chaos = mergeKeywords(out.Chaos, cfg.BugKeywords.Chaos)
+		out.Normal = mergeKeywords(out.Normal, cfg.BugKeywords.Normal)
+		out.Routine = mergeKeywords(out.Routine, cfg.BugKeywords.Routine)
 	}
 	return out
 }
 
 func normalizePath(p string) string {
 	return strings.ReplaceAll(p, "\\", "/")
+}
+
+// mergeKeywords appends `additions` to `base`, honoring a `!foo` token as
+// "drop foo from the result." Order is preserved; duplicates are collapsed.
+func mergeKeywords(base, additions []string) []string {
+	if len(additions) == 0 {
+		return base
+	}
+	drop := map[string]bool{}
+	var adds []string
+	for _, a := range additions {
+		if strings.HasPrefix(a, "!") {
+			drop[strings.ToLower(strings.TrimPrefix(a, "!"))] = true
+			continue
+		}
+		adds = append(adds, a)
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(base)+len(adds))
+	for _, k := range append(base, adds...) {
+		low := strings.ToLower(k)
+		if drop[low] || seen[low] {
+			continue
+		}
+		seen[low] = true
+		out = append(out, k)
+	}
+	return out
 }

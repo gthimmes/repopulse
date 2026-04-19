@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"mood-ring/internal/types"
+	"repopulse/internal/types"
 )
 
 // revertSubjectRE matches the common Revert commit subject forms.

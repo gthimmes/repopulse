@@ -3,7 +3,7 @@ package signals
 import (
 	"testing"
 
-	"mood-ring/internal/fixtures"
+	"repopulse/internal/fixtures"
 )
 
 func TestComputeFrequency_Calm(t *testing.T) {

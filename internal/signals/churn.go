@@ -4,7 +4,7 @@ import (
 	"math"
 	"sort"
 
-	"mood-ring/internal/types"
+	"repopulse/internal/types"
 )
 
 // ChurnOptions controls churn computation.

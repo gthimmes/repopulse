@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"mood-ring/internal/types"
+	"repopulse/internal/types"
 )
 
 // DetectCoverage tries to find + parse a coverage report. Returns nil if nothing found.

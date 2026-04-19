@@ -1,14 +1,15 @@
-# mood-ring roadmap
+# repopulse roadmap
 
 ## Current state
 
 - ✅ **Phase 1 complete** (1.1–1.5): hotspot drill-downs, bug explainability, CODEOWNERS team tags, hotspot recommendations, markdown digest export.
 - ✅ **Go port complete**: codebase is 100% Go. TypeScript fully removed. The fixture generator for Playwright now lives at `cmd/fixture-gen/main.go` with data in `internal/fixtures/ui.go`.
+- ✅ **Phase 2 partial**: 2.1 (snapshot store) + 2.2 (trend charts) shipped. Each run auto-writes a JSON snapshot under `<repo>/.repopulse/snapshots/` (rolling 365-entry cap, gitignore auto-created), and the HTML report includes a multi-series trend chart of the composite + per-signal scores across snapshots. Toggle via `-no-snapshot`.
+- ⏳ **Phase 2 remaining**: 2.3 (GitHub Action) + 2.4 (threshold alerts). Both need CI to validate end-to-end so they're sequenced after the local-artifact items.
 - ⏳ **Go port polish remaining** (task #19): parallelize `git show HEAD:<path>` calls (currently 100 sequential subprocess invocations make Go noticeably slower than it should be — clear parallelization opportunity); investigate a 1-commit off-by-one observed vs the prior TS implementation on a real-data run.
 - 📋 **Mood-badge redesign deferred** (task #18): emoji badge replaced with a score-ring or mission-control readout.
-- 📋 **Phase 2 not started.**
 
-**Test coverage:** 68 Go unit tests + 26 Playwright e2e = **94 green, 0 failures.**
+**Test coverage:** 96 Go unit tests + 29 Playwright e2e = **125 green, 0 failures.**
 
 The only Node footprint that remains is `@playwright/test` — Playwright is the industry-standard browser automation tool and its specs are test infra, not product code. That's explicitly scoped and intentional.
 
@@ -35,7 +36,7 @@ We ported the codebase from TypeScript to Go at the Phase 1 → Phase 2 boundary
 - Distribution to a multi-stack audience (not just JS shops) is one `go install` / single-binary download, no runtime hell.
 - TypeScript's "strong typing" is compile-time only — the runtime fragility we had (Chart.js function strings, stringly-typed commander options) would not have survived Phase 2's complexity.
 
-**Result**: a 4 MB static binary at `./mood-ring.exe` (or `./mood-ring` on unix). Application code lives under `cmd/mood-ring/` and `internal/`. A second 3 MB test-only binary `fixture-gen` at `cmd/fixture-gen/` backs the Playwright UI fixtures. The TS application code is gone.
+**Result**: a 4 MB static binary at `./repopulse.exe` (or `./repopulse` on unix). Application code lives under `cmd/repopulse/` and `internal/`. A second 3 MB test-only binary `fixture-gen` at `cmd/fixture-gen/` backs the Playwright UI fixtures. The TS application code is gone.
 
 ---
 
@@ -66,11 +67,11 @@ Shipped. Summary of what landed (TS first, then ported to Go):
 
 The snapshot model caps usefulness. Turn the tool into a time series in the systems engineers already watch. **Built in Go.**
 
-### 2.1 Snapshot store
-A `.mood-ring/snapshots/` directory of dated JSON snapshots, automatically pruned. Replaces the manual `--json` + `--compare` dance.
+### 2.1 Snapshot store ✅
+Implemented in `internal/snapshots/`. Each run writes `<repoPath>/.repopulse/snapshots/<YYYY-MM-DDTHHMMSSZ>.json` (with `-N` suffix on same-second collisions), keeps the most recent 365, and auto-creates `.repopulse/.gitignore` (`*`) so the user doesn't need to remember. The explicit `-json <path>` flag and `-compare <path>` flag still work independently of the store. Opt-out via `-no-snapshot`.
 
-### 2.2 Trend charts
-Composite score and per-signal trends over 3 / 6 / 12 months, with annotations (releases, big merges, known refactors). Answers "are we getting better or worse" which a single snapshot can't.
+### 2.2 Trend charts ✅
+Implemented in `internal/render/trends.go`. The HTML report now carries a `Score Trend Across Snapshots` section just below the Findings card with one Chart.js line per signal (composite shown by default, the five per-signal series legend-toggleable). Empty-state copy renders when there's only one snapshot. Annotations (releases, big merges) deferred — landing them needs a tagging mechanism that doesn't exist yet.
 
 ### 2.3 GitHub Action
 Runs on every PR, posts a comment: *"this PR touches `src/payments/ledger.ts` (hotspot #2, 14 bug commits in 90d) — consider an extra reviewer."* Configurable thresholds.
@@ -78,7 +79,7 @@ Runs on every PR, posts a comment: *"this PR touches `src/payments/ledger.ts` (h
 **Why this is the single highest-leverage Phase 2 item**: it's the only thing on the roadmap that puts the tool in front of every engineer on every PR. A health tool that isn't seen daily doesn't change behavior.
 
 ### 2.4 Threshold alerts
-`moodring.yml` declares max scores per signal; CI fails or posts to Slack when crossed. Optional, opt-in.
+`repopulse.yml` declares max scores per signal; CI fails or posts to Slack when crossed. Optional, opt-in.
 
 ---
 
@@ -140,11 +141,12 @@ The key validation experiment: does the composite score predict incidents N week
 
 From the active task list:
 
-1. **Finish task #19 (Go port polish)** — parallelize `git show`, investigate the 1-commit off-by-one, then port fixture generation to Go so we can delete `src/`. This closes out the port cleanly.
-2. **Task #18 (mood badge redesign)** — replace the emoji badge with a score ring. UI-only, no Go porting required, but should probably wait until after #19 to avoid thrashing.
-3. **Start Phase 2.3 (GitHub Action)** — the single highest-leverage item on the whole roadmap. The Go binary is ready for it. Would skip over #18 and #19's polish.
+1. **Phase 2.3 (GitHub Action)** — single highest-leverage item on the roadmap. With 2.1 + 2.2 in place, every PR comment can already point to a fresh snapshot's hotspot list. Needs a workflow YAML, the Action itself (probably a thin shell over the binary), and a PR-comment formatter that reuses `internal/render/markdown.go`.
+2. **Phase 2.4 (threshold alerts)** — `repopulse.yml` declarative thresholds → fail CI / post Slack. Cleanest after 2.3 lands so they share the same workflow harness.
+3. **Finish task #19 (Go port polish)** — parallelize `git show`, investigate the 1-commit off-by-one. Independent of Phase 2.
+4. **Task #18 (mood badge redesign)** — replace the emoji badge with a score ring. UI-only.
 
-**Recommended order**: finish #19 → ship #18 → start Phase 2.3. But any of the three is a reasonable next move depending on whether we want correctness, polish, or reach.
+**Recommended order**: 2.3 → 2.4 to finish Phase 2, then #19 (polish) and #18 (UI) before opening Phase 3.
 
 ---
 

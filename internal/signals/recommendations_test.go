@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"mood-ring/internal/types"
+	"repopulse/internal/types"
 )
 
 func makeHS(overrides func(*types.HotspotEntry)) types.HotspotEntry {

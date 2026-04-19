@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"os"
 
-	"mood-ring/internal/types"
+	"repopulse/internal/types"
 )
 
 type ReportSnapshot struct {

@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"mood-ring/internal/config"
-	"mood-ring/internal/fixtures"
-	"mood-ring/internal/types"
+	"repopulse/internal/config"
+	"repopulse/internal/fixtures"
+	"repopulse/internal/types"
 )
 
 var defaultBugOpts = BugOptions{
@@ -101,6 +101,47 @@ func TestClassifyCommitWithKeyword_NonBug(t *testing.T) {
 	tier, kw := ClassifyCommitWithKeyword("feat: add user profile", false, defaultBugOpts)
 	if tier != TierNone || kw != "" {
 		t.Errorf("want none+'', got %s+%s", tier, kw)
+	}
+}
+
+func TestClassifyCommitWithKeyword_ConventionalPrefixVetoesKeywordMatch(t *testing.T) {
+	cases := []struct {
+		name, msg string
+	}{
+		{"feat-with-fix-in-body", "feat: add X to replace the old buggy fix path"},
+		{"feat-with-scope", "feat(auth): rework session flow to fix login"},
+		{"feat-breaking", "feat!: remove deprecated patch endpoint"},
+		{"feat-scope-breaking", "feat(api)!: delete the old hotfix route"},
+		{"chore-with-patch", "chore: bump dep to patch CVE"},
+		{"docs-with-typo", "docs(api): fix typo in examples"},
+		{"style-with-formatting", "style: apply standard formatting across package"},
+		{"test-with-bug", "test: add coverage for login bug repro"},
+		{"refactor-with-fix", "refactor: extract helper; fix duplicate imports"},
+		{"ci-with-broken", "ci: skip broken matrix entry until upstream patch"},
+		{"build-with-regression", "build: revert webpack 5 regression bump"},
+		{"perf-with-workaround", "perf: switch algorithm; removes old workaround"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tier, kw := ClassifyCommitWithKeyword(c.msg, false, defaultBugOpts)
+			if tier != TierNone || kw != "" {
+				t.Errorf("%q → want none+'', got %s+%s", c.msg, tier, kw)
+			}
+		})
+	}
+}
+
+func TestClassifyCommitWithKeyword_FixPrefixStillClassifies(t *testing.T) {
+	// `fix:` and `revert:` are deliberately NOT in the non-bug prefix list —
+	// they remain subject to the regular keyword path so they keep landing
+	// in normal/routine/chaos as appropriate.
+	tier, kw := ClassifyCommitWithKeyword("fix(auth): handle nil token", false, defaultBugOpts)
+	if tier != TierNormal || kw != "fix" {
+		t.Errorf("want normal+fix, got %s+%s", tier, kw)
+	}
+	tier2, _ := ClassifyCommitWithKeyword("fix: cleanup whitespace", false, defaultBugOpts)
+	if tier2 != TierRoutine {
+		t.Errorf("want routine for fix+whitespace, got %s", tier2)
 	}
 }
 

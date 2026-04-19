@@ -135,6 +135,7 @@ const cssTemplate = `    :root {
     .mood-label { font-size: 30px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text); background: linear-gradient(180deg, #fff 0%%, var(--mood-accent) 120%%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; position: relative; z-index: 1; }
     .mood-score { font-size: 13px; color: var(--text-dim); margin-top: 10px; font-family: 'JetBrains Mono', ui-monospace, 'Menlo', monospace; letter-spacing: 0.1em; text-transform: uppercase; position: relative; z-index: 1; }
     .mood-score b { color: var(--mood-accent); font-weight: 700; }
+    .mood-scale { font-size: 10.5px; color: var(--text-faint); margin-top: 4px; position: relative; z-index: 1; font-family: 'JetBrains Mono', ui-monospace, monospace; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.75; }
     .mood-meta { font-size: 12px; color: var(--text-faint); margin-top: 8px; position: relative; z-index: 1; font-family: 'JetBrains Mono', ui-monospace, monospace; letter-spacing: 0.06em; }
 
     .delta-pill { display: inline-block; margin-left: 10px; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; font-family: 'JetBrains Mono', ui-monospace, monospace; letter-spacing: 0.08em; vertical-align: middle; border: 1px solid; }
@@ -258,6 +259,10 @@ const cssTemplate = `    :root {
     details.why-panel[open] > summary .chevron { transform: rotate(90deg); color: var(--accent); }
     details.why-panel > summary .why-title { font-size: 11px; font-weight: 700; letter-spacing: 0.22em; text-transform: uppercase; color: var(--text-dim); }
     details.why-panel > summary .why-sub { font-size: 11px; color: var(--text-faint); font-family: 'JetBrains Mono', ui-monospace, monospace; letter-spacing: 0.04em; }
+    .why-legend { font-size: 12px; color: var(--text-dim); line-height: 1.55; padding: 10px 12px; margin: 4px 0 16px; border-left: 2px solid var(--border-hi); background: rgba(148, 163, 184, 0.04); border-radius: 4px; }
+    .why-legend strong { color: var(--text); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+    .why-legend em { color: var(--text-faint); font-style: normal; }
+    .why-sampling { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; color: var(--text-dim); letter-spacing: 0.06em; text-transform: none; font-weight: 600; }
     .why-tier-block { margin-bottom: 16px; border-top: 1px solid var(--border); padding-top: 14px; }
     .why-tier-block:last-child { margin-bottom: 0; }
     .why-tier-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; }

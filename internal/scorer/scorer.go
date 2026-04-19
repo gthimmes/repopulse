@@ -4,7 +4,7 @@ package scorer
 import (
 	"math"
 
-	"mood-ring/internal/types"
+	"repopulse/internal/types"
 )
 
 var Weights = struct {

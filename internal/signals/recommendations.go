@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"mood-ring/internal/types"
+	"repopulse/internal/types"
 )
 
 // BuildRecommendations produces 0–N recommendations for a hotspot.

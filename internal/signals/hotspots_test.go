@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"mood-ring/internal/types"
+	"repopulse/internal/types"
 )
 
 func mkc(hash string, daysAgo int, message string, files []types.FileChange, name string) types.CommitRecord {

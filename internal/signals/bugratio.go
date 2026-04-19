@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"mood-ring/internal/types"
+	"repopulse/internal/types"
 )
 
 // BugTier is the classification of a commit's bug-ness.
@@ -44,6 +44,13 @@ func ClassifyCommit(message string, isRevert bool, opts BugOptions) BugTier {
 	return t
 }
 
+// nonBugPrefixes are Conventional-Commit types that by definition aren't
+// bug fixes. Subjects starting with these (optionally with a scope) short-
+// circuit to TierNone so a `feat: add X to replace buggy Y` doesn't get
+// caught by body-content keyword matches. `fix` and `revert` are absent
+// on purpose — those remain classified by the regular keyword path.
+var nonBugPrefixRE = regexp.MustCompile(`^\s*(feat|feature|chore|docs|doc|style|test|tests|refactor|ci|build|perf)(\([^)]*\))?\s*!?:`)
+
 // ClassifyCommitWithKeyword returns the tier plus the keyword that matched
 // (or "(revert)" for reverts, empty string for none).
 func ClassifyCommitWithKeyword(message string, isRevert bool, opts BugOptions) (BugTier, string) {
@@ -51,6 +58,12 @@ func ClassifyCommitWithKeyword(message string, isRevert bool, opts BugOptions) (
 		return TierChaos, "(revert)"
 	}
 	lower := strings.ToLower(message)
+
+	// Conventional-commit prefix veto: feat/chore/docs/etc. never classify
+	// as a bug regardless of body content.
+	if firstLine := strings.SplitN(lower, "\n", 2)[0]; nonBugPrefixRE.MatchString(firstLine) {
+		return TierNone, ""
+	}
 
 	if kw := findKeyword(lower, opts.ChaosKeywords); kw != "" {
 		return TierChaos, kw

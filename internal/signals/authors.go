@@ -5,7 +5,7 @@ import (
 	"sort"
 	"time"
 
-	"mood-ring/internal/types"
+	"repopulse/internal/types"
 )
 
 type AuthorOptions struct {

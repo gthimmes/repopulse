@@ -1,4 +1,4 @@
-module mood-ring
+module repopulse
 
 go 1.23
 

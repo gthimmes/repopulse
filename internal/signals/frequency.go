@@ -4,7 +4,7 @@ import (
 	"math"
 	"time"
 
-	"mood-ring/internal/types"
+	"repopulse/internal/types"
 )
 
 // ComputeFrequency computes the commit frequency signal.

@@ -3,7 +3,7 @@ package scorer
 import (
 	"testing"
 
-	"mood-ring/internal/types"
+	"repopulse/internal/types"
 )
 
 func makeFreq(score int) types.FrequencySignal {

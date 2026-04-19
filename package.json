@@ -1,7 +1,7 @@
 {
-  "name": "mood-ring-e2e",
+  "name": "repopulse-e2e",
   "version": "0.1.0",
-  "description": "Playwright end-to-end harness for mood-ring. The product itself is 100% Go — see cmd/mood-ring and internal/. This file exists only because Playwright is a Node-ecosystem tool.",
+  "description": "Playwright end-to-end harness for repopulse. The product itself is 100% Go — see cmd/repopulse and internal/. This file exists only because Playwright is a Node-ecosystem tool.",
   "private": true,
   "scripts": {
     "test:e2e": "playwright test"

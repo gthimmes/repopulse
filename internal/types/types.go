@@ -1,4 +1,4 @@
-// Package types holds all shared data shapes for the mood-ring tool.
+// Package types holds all shared data shapes for the repopulse tool.
 // This is a direct port of src/types.ts — field names and JSON tags must
 // match the TS version so JSON snapshots and Playwright e2e tests stay
 // compatible.
@@ -242,14 +242,15 @@ type RollingPoint struct {
 // --- CLI options ---
 
 type CliOptions struct {
-	Window   int
-	Output   string
-	Open     bool
-	Since    string
-	Ignore   []string
-	JSON     string
-	Compare  string
-	Markdown string
+	Window     int
+	Output     string
+	Open       bool
+	Since      string
+	Ignore     []string
+	JSON       string
+	Compare    string
+	Markdown   string
+	NoSnapshot bool
 }
 
 // --- Delta (compare) ---

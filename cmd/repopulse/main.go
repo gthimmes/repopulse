@@ -1,0 +1,302 @@
+// repopulse — Go port of the TypeScript CLI. Produces a self-contained
+// HTML dashboard showing the emotional state of a Git repository.
+package main
+
+import (
+	"encoding/json"
+	"flag"
+	"fmt"
+	"math"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"time"
+
+	"repopulse/internal/codeowners"
+	"repopulse/internal/compare"
+	"repopulse/internal/config"
+	"repopulse/internal/git"
+	"repopulse/internal/narrative"
+	"repopulse/internal/render"
+	"repopulse/internal/scorer"
+	"repopulse/internal/signals"
+	"repopulse/internal/snapshots"
+	"repopulse/internal/types"
+)
+
+type stringsFlag []string
+
+func (s *stringsFlag) String() string     { return strings.Join(*s, ",") }
+func (s *stringsFlag) Set(v string) error { *s = append(*s, v); return nil }
+
+func main() {
+	fs := flag.NewFlagSet("repopulse", flag.ExitOnError)
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: repopulse <repo-path> [options]\n\nOptions:\n")
+		fs.PrintDefaults()
+	}
+
+	window := fs.Int("window", 90, "Analysis window in days")
+	output := fs.String("output", "output/repopulse-report.html", "Output HTML file path")
+	open := fs.Bool("open", false, "Open in browser after writing")
+	since := fs.String("since", "", "Start from date (ISO or relative)")
+	var ignorePats stringsFlag
+	fs.Var(&ignorePats, "ignore", "Additional ignore glob pattern (repeatable)")
+	jsonOut := fs.String("json", "", "Also write a JSON snapshot")
+	cmpPath := fs.String("compare", "", "Previous JSON snapshot to diff against")
+	markdownOut := fs.String("markdown", "", "Also write a markdown digest")
+	noSnapshot := fs.Bool("no-snapshot", false, "Skip the automatic .repopulse/snapshots/ entry")
+
+	if len(os.Args) < 2 {
+		fs.Usage()
+		os.Exit(1)
+	}
+	if err := fs.Parse(os.Args[2:]); err != nil {
+		os.Exit(1)
+	}
+	repoPathRaw := os.Args[1]
+	opts := types.CliOptions{
+		Window:     *window,
+		Output:     *output,
+		Open:       *open,
+		Since:      *since,
+		Ignore:     []string(ignorePats),
+		JSON:       *jsonOut,
+		Compare:    *cmpPath,
+		Markdown:   *markdownOut,
+		NoSnapshot: *noSnapshot,
+	}
+
+	if err := run(repoPathRaw, opts); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func run(repoPathRaw string, opts types.CliOptions) error {
+	repoPath, err := filepath.Abs(repoPathRaw)
+	if err != nil {
+		return err
+	}
+
+	cfg := config.LoadConfig(repoPath)
+	isExcluded := config.BuildIgnorePredicate(cfg, opts.Ignore)
+	bugKW := config.ResolvedBugKeywords(cfg)
+	bugOpts := signals.BugOptions{
+		ChaosKeywords:   bugKW.Chaos,
+		NormalKeywords:  bugKW.Normal,
+		RoutineKeywords: bugKW.Routine,
+	}
+
+	commits, err := git.CollectCommits(git.CollectorOptions{
+		RepoPath:   repoPath,
+		WindowDays: opts.Window,
+		Since:      opts.Since,
+	})
+	if err != nil {
+		return err
+	}
+	if len(commits) == 0 {
+		return fmt.Errorf("repository has no commits in the analysis window")
+	}
+
+	// Clip window to oldest commit date
+	windowEnd := time.Now()
+	oldest := commits[0].Date
+	for _, c := range commits {
+		if c.Date.Before(oldest) {
+			oldest = c.Date
+		}
+	}
+	requestedStart := time.Now().AddDate(0, 0, -opts.Window)
+	windowStart := oldest
+	if requestedStart.After(oldest) {
+		windowStart = requestedStart
+	}
+	effectiveWindowDays := int(math.Max(1, math.Ceil(windowEnd.Sub(windowStart).Hours()/24)))
+
+	// Signals
+	freq := signals.ComputeFrequency(commits, effectiveWindowDays)
+	churn := signals.ComputeChurn(commits, signals.ChurnOptions{
+		IsExcluded:   isExcluded,
+		WindowDays:   effectiveWindowDays,
+		GetLineCount: func(p string) int { return git.GetFileLineCount(repoPath, p) },
+	})
+	bug := signals.ComputeBugRatio(commits, bugOpts)
+	cov := signals.DetectCoverage(repoPath)
+	co := codeowners.Load(repoPath)
+	modules := signals.ComputeModules(commits, signals.ModuleOptions{
+		IsExcluded: isExcluded,
+		BugOptions: bugOpts,
+		Codeowners: co,
+	})
+	churnLookup := map[string]types.ChurnEntry{}
+	for _, c := range churn.TopChurners {
+		churnLookup[c.Path] = c
+	}
+	hotspots := signals.ComputeHotspots(commits, signals.HotspotOptions{
+		IsExcluded:  isExcluded,
+		BugOptions:  bugOpts,
+		Codeowners:  co,
+		ChurnLookup: churnLookup,
+		WindowEnd:   windowEnd,
+	})
+	preEmails, _ := git.GetPreWindowAuthorEmails(repoPath, windowStart)
+	authors := signals.ComputeAuthors(commits, signals.AuthorOptions{
+		IsExcluded:            isExcluded,
+		WindowStart:           windowStart,
+		PreWindowAuthorEmails: preEmails,
+	})
+	rolling := narrative.ComputeRollingTimeline(commits, windowStart, windowEnd, bugOpts)
+
+	base := scorer.ComputeMood(scorer.Input{
+		CommitFrequency: freq,
+		FileChurn:       churn,
+		BugRatio:        bug,
+		Coverage:        cov,
+		Modules:         modules,
+		Hotspots:        hotspots,
+		Authors:         authors,
+		RollingTimeline: rolling,
+	})
+	meta := types.RepoMeta{
+		RepoName:          filepath.Base(repoPath),
+		RepoPath:          repoPath,
+		AnalyzedCommits:   len(commits),
+		WindowDays:        effectiveWindowDays,
+		WindowStart:       windowStart,
+		WindowEnd:         windowEnd,
+		GeneratedAt:       time.Now(),
+		HasLimitedHistory: len(commits) < 10,
+	}
+	narr := narrative.Generate(base, meta)
+	mood := base
+	mood.Narrative = narr
+
+	// Delta
+	var delta *types.MoodDelta
+	if opts.Compare != "" {
+		prev, err := compare.LoadSnapshot(opts.Compare)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not load --compare file: %v\n", err)
+		} else {
+			d := compare.BuildDelta(mood, prev.MoodResult, prev.GeneratedAt)
+			delta = &d
+		}
+	}
+
+	// Persistent snapshot store: write current run, then load the full
+	// history so the trend chart includes every prior point.
+	currentSnap := compare.ReportSnapshot{
+		GeneratedAt:     meta.GeneratedAt.UTC().Format(time.RFC3339Nano),
+		RepoName:        meta.RepoName,
+		WindowDays:      meta.WindowDays,
+		AnalyzedCommits: meta.AnalyzedCommits,
+		MoodResult:      mood,
+	}
+	var trendSnaps []compare.ReportSnapshot
+	var snapPath string
+	if !opts.NoSnapshot {
+		p, err := snapshots.Save(repoPath, currentSnap)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not write snapshot: %v\n", err)
+		} else {
+			snapPath = p
+		}
+		loaded, err := snapshots.Load(repoPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not load snapshot history: %v\n", err)
+		} else {
+			trendSnaps = loaded
+		}
+	}
+
+	// HTML
+	html := render.RenderHTML(mood, meta, delta, trendSnaps)
+	outputPath, err := filepath.Abs(opts.Output)
+	if err != nil {
+		return err
+	}
+	if err := writeFileMkdir(outputPath, []byte(html)); err != nil {
+		return err
+	}
+
+	// Optional JSON (explicit path; independent of the persistent store)
+	if opts.JSON != "" {
+		data, _ := json.MarshalIndent(currentSnap, "", "  ")
+		jsonPath, _ := filepath.Abs(opts.JSON)
+		if err := writeFileMkdir(jsonPath, data); err != nil {
+			return err
+		}
+		fmt.Printf("  JSON snapshot:     %s\n", jsonPath)
+	}
+
+	// Optional markdown
+	if opts.Markdown != "" {
+		md := render.RenderMarkdown(mood, meta, delta, render.MarkdownOptions{
+			HTMLReportPath: outputPath,
+		})
+		mdPath, _ := filepath.Abs(opts.Markdown)
+		if err := writeFileMkdir(mdPath, []byte(md)); err != nil {
+			return err
+		}
+		fmt.Printf("  Markdown digest:   %s\n", mdPath)
+	}
+
+	// Summary
+	moodLabel := strings.ToUpper(string(mood.Mood)[:1]) + string(mood.Mood)[1:]
+	emoji := render.MoodEmoji(string(mood.Mood))
+	fmt.Printf("\n\u2713 Analyzed %d commits over %d days\n", len(commits), effectiveWindowDays)
+	fmt.Printf("  Mood: %s %s (score: %d/100)\n", moodLabel, emoji, mood.CompositeScore)
+	if delta != nil {
+		sign := ""
+		if delta.Composite >= 0 {
+			sign = "+"
+		}
+		fmt.Printf("  \u0394 vs previous:   %s%d\n", sign, delta.Composite)
+	}
+	fmt.Printf("  HTML report:       %s\n", outputPath)
+	if snapPath != "" {
+		fmt.Printf("  Snapshot stored:   %s (%d total)\n", snapPath, len(trendSnaps))
+	}
+	if len(mood.Signals.Modules.Modules) > 0 {
+		top := mood.Signals.Modules.Modules
+		if len(top) > 3 {
+			top = top[:3]
+		}
+		parts := make([]string, len(top))
+		for i, m := range top {
+			parts[i] = fmt.Sprintf("%s:%d", m.Name, m.Score)
+		}
+		fmt.Printf("  Hot modules:       %s\n", strings.Join(parts, ", "))
+	}
+	fmt.Println()
+
+	if opts.Open {
+		openInBrowser(outputPath)
+	}
+	return nil
+}
+
+func openInBrowser(path string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("cmd", "/c", "start", "", path)
+	case "darwin":
+		cmd = exec.Command("open", path)
+	default:
+		cmd = exec.Command("xdg-open", path)
+	}
+	_ = cmd.Start()
+}
+
+// writeFileMkdir writes data to path, creating parent directories as needed.
+func writeFileMkdir(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
+}

@@ -5,8 +5,8 @@ import (
 	"sort"
 	"time"
 
-	"mood-ring/internal/codeowners"
-	"mood-ring/internal/types"
+	"repopulse/internal/codeowners"
+	"repopulse/internal/types"
 )
 
 type HotspotOptions struct {

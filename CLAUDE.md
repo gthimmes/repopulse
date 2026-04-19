@@ -1,8 +1,8 @@
-# CLAUDE.md — Codebase Mood Ring
+# CLAUDE.md — Codebase Repopulse
 
 ## What this project is
 
-A Go CLI tool (`mood-ring`) that analyzes a local Git repository and generates a **self-contained HTML file** + optional Markdown digest visualizing the "emotional state" of the codebase over time.
+A Go CLI tool (`repopulse`) that analyzes a local Git repository and generates a **self-contained HTML file** + optional Markdown digest visualizing the "emotional state" of the codebase over time.
 
 No AI. No external APIs. Pure git data + math + Chart.js output.
 
@@ -10,11 +10,13 @@ No AI. No external APIs. Pure git data + math + Chart.js output.
 
 ## Current state (read this first when resuming)
 
-**Phase 1 is complete. The codebase is 100% Go.**
+**Phase 1 complete. Phase 2.1 + 2.2 (snapshot store + trend chart) shipped. Codebase is 100% Go.**
 
-- Application code + all signal math: `cmd/mood-ring/main.go` + `internal/*`
+- Application code + all signal math: `cmd/repopulse/main.go` + `internal/*`
+- Persistent snapshot store: `internal/snapshots/` writes `<repo>/.repopulse/snapshots/<ts>.json` every run, capped at 365, gitignore auto-laid. Opt out with `-no-snapshot`.
+- Trend chart in HTML report: `internal/render/trends.go` reads the store and renders a multi-series Chart.js line (composite shown by default, 5 per-signal series legend-toggleable).
 - Fixture generator for the Playwright e2e tests: `cmd/fixture-gen/main.go`
-- Ships as a **4 MB static binary** (`mood-ring.exe`) with a single runtime dependency (the `git` command on PATH)
+- Ships as a **4 MB static binary** (`repopulse.exe`) with a single runtime dependency (the `git` command on PATH)
 
 **TypeScript is gone.** The only remaining Node footprint is the Playwright test harness — `package.json` declares `@playwright/test` as the sole devDependency, and `tests/e2e/*.spec.ts` are Playwright specs (Playwright has its own built-in TS handling, no `tsconfig.json` needed). This is test infrastructure, not product code, and it stays because Playwright is the industry-standard tool for browser automation and there's no Go-native equivalent.
 
@@ -37,15 +39,16 @@ Do NOT build a dev server, web app, or anything requiring a running process to v
 ## Project structure
 
 ```
-mood-ring/
+repopulse/
 ├── cmd/
-│   ├── mood-ring/main.go          # Primary CLI entry point
+│   ├── repopulse/main.go          # Primary CLI entry point
 │   └── fixture-gen/main.go        # Test-only: writes the Playwright fixture HTML
 ├── internal/
 │   ├── types/          # Shared structs
 │   ├── git/            # git log invocation + parser
 │   ├── config/         # ignore patterns + bug-keyword tiers
 │   ├── codeowners/     # CODEOWNERS parser, path matcher
+│   ├── snapshots/      # Phase 2.1 persistent store: save/load/prune `.repopulse/snapshots/`
 │   ├── signals/        # per-signal computations
 │   │   ├── frequency.go    # Commit cadence
 │   │   ├── churn.go        # Churn density + throughput
@@ -93,14 +96,14 @@ When the repo is cloned fresh:
 
 4. **Build**:
    ```bash
-   go build -o mood-ring.exe ./cmd/mood-ring       # Windows (or `mood-ring` on unix)
+   go build -o repopulse.exe ./cmd/repopulse       # Windows (or `repopulse` on unix)
    go build -o fixture-gen.exe ./cmd/fixture-gen   # Needed before running Playwright
    ```
 
 5. **Verify everything works**:
    ```bash
-   go test ./internal/...       # 68 tests
-   npx playwright test          # 26 tests
+   go test ./internal/...       # Go unit tests
+   npx playwright test          # Playwright e2e tests
    ```
 
 Both suites should be green before making changes.
@@ -110,12 +113,12 @@ Both suites should be green before making changes.
 ## Running the tool
 
 ```bash
-./mood-ring.exe /path/to/repo                                    # writes output/mood-report.html
-./mood-ring.exe /path/to/repo -markdown output/digest.md         # HTML + markdown digest
-./mood-ring.exe /path/to/repo -json output/snap.json -open       # HTML + JSON snapshot + auto-open
+./repopulse.exe /path/to/repo                                    # writes output/repopulse-report.html
+./repopulse.exe /path/to/repo -markdown output/digest.md         # HTML + markdown digest
+./repopulse.exe /path/to/repo -json output/snap.json -open       # HTML + JSON snapshot + auto-open
 ```
 
-Full flag list: `./mood-ring.exe --help`.
+Full flag list: `./repopulse.exe --help`.
 
 ---
 
@@ -146,8 +149,8 @@ Two suites, both green:
 
 | Suite | Count | Command | Notes |
 |-------|-------|---------|-------|
-| Go unit | 68 | `go test ./internal/...` | Pure math verification over deterministic fixtures |
-| Playwright e2e | 26 | `npx playwright test` | Drives a real browser against fixture + real-data reports |
+| Go unit | 78 | `go test ./internal/...` | Pure math verification over deterministic fixtures |
+| Playwright e2e | 27 | `npx playwright test` | Drives a real browser against fixture + real-data reports |
 
 Playwright requires `fixture-gen.exe` to be built first — `tests/e2e/fixtures.ts` execs it to produce the fixture HTML. `playwright.config.ts` does not currently auto-build; add a `globalSetup` hook when this becomes friction.
 
@@ -185,6 +188,9 @@ Chart.js config objects are emitted as JS object-literal strings (not JSON) so c
 ### Output paths
 The CLI defaults all outputs under `output/` and auto-creates the parent directory via `writeFileMkdir`. Users can override with explicit `-output`, `-json`, `-markdown` paths pointing anywhere.
 
+### Snapshot store (Phase 2.1)
+Lives **inside the analyzed repo** at `<repoPath>/.repopulse/snapshots/`, not the cwd — keeps history portable with the repo so a teammate's report includes the same trend. First write lays down `.repopulse/.gitignore` with `*` so the store never accidentally gets committed. Filenames are UTC ISO timestamps (`2026-04-19T020807Z.json`) so lexical sort = chronological sort. Pruning is count-based (default 365 newest); replace with retention-policy logic if/when needed.
+
 ---
 
 ## Dependencies
@@ -205,7 +211,7 @@ The CLI defaults all outputs under `output/` and auto-creates the parent directo
 - Introduce a JavaScript/TypeScript build step for application code — the product is Go-only. Playwright specs stay in `.ts` because that's what Playwright uses internally, but anything under `cmd/` or `internal/` is Go.
 - Create dev servers, Express/fiber apps, or anything requiring a running process to serve the report.
 - Add new signals without updating `SPEC.md` and the scorer weight table.
-- Commit generated files. Anything under `output/` is gitignored. Generated binaries (`mood-ring.exe`, `fixture-gen.exe`) are too.
+- Commit generated files. Anything under `output/` is gitignored. Generated binaries (`repopulse.exe`, `fixture-gen.exe`) are too.
 
 ---
 

@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"time"
 
-	"mood-ring/internal/types"
+	"repopulse/internal/types"
 )
 
 var revertRE = regexp.MustCompile(`^(?:Revert\s+["']|revert\s*[:(])`)

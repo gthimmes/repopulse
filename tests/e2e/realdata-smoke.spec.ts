@@ -9,17 +9,17 @@ import { existsSync } from 'node:fs';
  * not just the deterministic fixture.
  *
  * Skipped by default so CI without a local repo still passes. To enable:
- *   ./mood-ring.exe /path/to/any/local/repo -output output/mood-report.html
+ *   ./repopulse.exe /path/to/any/local/repo -output output/repopulse-report.html
  *   npx playwright test tests/e2e/realdata-smoke.spec.ts
  *
  * The path tracks the CLI's default `-output`, so just running the binary
  * once before Playwright populates it automatically.
  */
-const REAL_REPORT = resolve(process.cwd(), 'output/mood-report.html');
+const REAL_REPORT = resolve(process.cwd(), 'output/repopulse-report.html');
 const SCREENSHOT_DIR = resolve(process.cwd(), 'tests/screenshots');
 
 test.describe('Real-data smoke', () => {
-  test.skip(!existsSync(REAL_REPORT), 'output/mood-report.html not generated; skipping real-data smoke');
+  test.skip(!existsSync(REAL_REPORT), 'output/repopulse-report.html not generated; skipping real-data smoke');
 
   test('real-data report: hotspot drill-down + bug explainability render without errors', async ({ page }) => {
     const errors: string[] = [];

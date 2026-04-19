@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"mood-ring/internal/signals"
-	"mood-ring/internal/types"
+	"repopulse/internal/signals"
+	"repopulse/internal/types"
 )
 
 // Generate produces 3-8 findings ordered alert > warn > info > good.
