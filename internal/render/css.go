@@ -285,6 +285,21 @@ const cssTemplate = `    :root {
     ul.contrib-files code { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .contrib-file-stats { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: var(--text-faint); white-space: nowrap; }
 
+    /* Phase 3.1 — PR Flow card */
+    .pr-banner { font-size: 12px; color: #fde68a; background: rgba(251, 191, 36, 0.08); border: 1px solid rgba(251, 191, 36, 0.30); border-radius: 6px; padding: 8px 12px; margin-bottom: 14px; }
+    .pr-headlines { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 18px; padding-bottom: 18px; border-bottom: 1px solid var(--border); }
+    .pr-headline { padding: 8px 0; }
+    .pr-num-big { font-size: 26px; font-weight: 700; color: var(--text); font-family: 'JetBrains Mono', ui-monospace, monospace; line-height: 1.1; }
+    .pr-label { font-size: 10.5px; color: var(--text-dim); margin-top: 4px; text-transform: uppercase; letter-spacing: 0.12em; font-weight: 600; }
+    .pr-label .sublabel { display: block; font-weight: 400; margin-top: 3px; text-transform: none; letter-spacing: 0.04em; color: var(--text-faint); font-size: 10px; font-family: 'JetBrains Mono', ui-monospace, monospace; }
+    ul.pr-samples { list-style: none; padding: 0; margin: 6px 0 0 0; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+    ul.pr-samples li { display: grid; grid-template-columns: 50px 120px 60px 1fr; gap: 10px; align-items: center; padding: 3px 0; border-bottom: 1px dashed var(--border); }
+    ul.pr-samples li:last-child { border-bottom: none; }
+    ul.pr-samples .pr-num { font-family: 'JetBrains Mono', ui-monospace, monospace; color: var(--text-faint); font-size: 11px; }
+    ul.pr-samples .pr-author { font-family: 'JetBrains Mono', ui-monospace, monospace; color: var(--text-dim); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    ul.pr-samples .pr-cycle { font-family: 'JetBrains Mono', ui-monospace, monospace; color: var(--text-faint); font-size: 11px; text-align: right; }
+    ul.pr-samples .pr-title { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
     /* Plank 2 — Standards card */
     .standards-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 18px; }
     .standards-card { border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; background: rgba(148, 163, 184, 0.03); }

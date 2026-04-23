@@ -27,6 +27,7 @@ Two artifacts, written to `output/` by default:
 - **Findings** — 3–8 narrative bullets sorted by severity (alert/warn/info/good)
 - **Score trend across snapshots** — composite + per-signal lines across every past run (snapshots auto-stored in `.repopulse/snapshots/`)
 - **Standards** — deterministic compliance card: conventional-commit format % + test density (tests-per-source file ratio) with per-author and per-module breakdowns
+- **PR Flow** *(optional, requires a GitHub token)* — cycle-time distribution, time-to-first-review, reviewer workload concentration, rubber-stamp rate, self-merge rate
 - **Stats row** — commits, files touched, bug %, commits/day
 - **Score breakdown** — per-signal horizontal bars with bands
 - **Module mood grid** — per top-level directory with team ownership from CODEOWNERS
@@ -52,7 +53,32 @@ Options:
   -compare <file>     Previous JSON snapshot to diff against
   -markdown <file>    Also write a Markdown digest
   -no-snapshot        Skip the automatic .repopulse/snapshots/ entry
+  -github-token <t>   GitHub personal-access token for PR metrics
+                      (falls back to GITHUB_TOKEN env var)
+  -github-repo <o/n>  Override owner/name when the origin URL is ambiguous
 ```
+
+### GitHub PR metrics (optional)
+
+If you provide a GitHub token via `-github-token` or `GITHUB_TOKEN`, a
+"PR Flow" card appears in the report with:
+
+- P50 / P75 / P95 cycle time (created → merged, in hours)
+- P50 time-to-first-review
+- Top reviewers by workload share (surfaces review bottlenecks)
+- Rubber-stamp rate (PRs approved in < 60s with no review comments)
+- Self-merge rate
+
+**Token scopes:** minimum is `public_repo` for public repos or `repo`
+for private ones. The token is only used to read PR metadata — no
+writes, no OAuth flow, no account linking.
+
+**Caching:** PR data is cached under `<repo>/.repopulse/pr-cache/` so
+subsequent runs only refetch PRs whose `updated_at` changed. When the
+GitHub API rate-limits, the report falls back to whichever PRs are
+already cached and surfaces a banner so you know the numbers may be
+stale. No token configured → the section is skipped entirely and the
+rest of the report works offline.
 
 ## Configuration — `.repopulserc`
 

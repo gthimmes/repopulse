@@ -296,6 +296,50 @@ type ModuleDensityEntry struct {
 	DensityPct  float64 `json:"densityPct"`
 }
 
+// --- PR flow (GitHub PR metadata integration) ---
+
+// PRFlowSignal carries every PR-derived signal surfaced in the report.
+// Nil-able on MoodResult.Signals because the whole block is gated on a
+// GitHub token being available; no token → no section.
+type PRFlowSignal struct {
+	Type         string          `json:"type"` // "prFlow"
+	OwnerRepo    string          `json:"ownerRepo"`  // e.g. "anthropic/claude-code"
+	WindowDays   int             `json:"windowDays"`
+	TotalPRs     int             `json:"totalPrs"`
+	MergedPRs    int             `json:"mergedPrs"`
+	CycleHours   Percentiles     `json:"cycleHours"`   // merged-PR cycle time p50/p75/p95 in hours
+	TTFRHours    Percentiles     `json:"ttfrHours"`    // time-to-first-review p50/p75 in hours
+	Reviewers    []ReviewerEntry `json:"reviewers"`    // top-N reviewers by PR count
+	RubberStamps []PRSample      `json:"rubberStamps"` // approved in <60s with 0 review comments
+	RubberStampRate float64      `json:"rubberStampRate"` // %
+	SelfMergeRate   float64      `json:"selfMergeRate"`   // % of merged PRs merged by their own author
+	// CacheBanner surfaces when rate-limited so the report explains why
+	// the data might be stale rather than silently serving cached
+	// numbers. Empty string when no banner should render.
+	CacheBanner string `json:"cacheBanner,omitempty"`
+}
+
+// Percentiles holds common distribution stats for a single metric.
+type Percentiles struct {
+	P50 float64 `json:"p50"`
+	P75 float64 `json:"p75"`
+	P95 float64 `json:"p95"`
+}
+
+type ReviewerEntry struct {
+	Login       string  `json:"login"`
+	ReviewCount int     `json:"reviewCount"` // # of PRs they reviewed
+	SharePct    float64 `json:"sharePct"`    // their share of total review activity
+}
+
+type PRSample struct {
+	Number     int    `json:"number"`
+	Title      string `json:"title"`
+	Author     string `json:"author"`
+	MergedBy   string `json:"mergedBy,omitempty"`
+	CycleHours float64 `json:"cycleHours"`
+}
+
 type DayBucket struct {
 	Date  string `json:"date"`
 	Count int    `json:"count"`
@@ -330,6 +374,7 @@ type Signals struct {
 	Authors         AuthorSignal      `json:"authors"`
 	AuthorDrift     AuthorDriftSignal `json:"authorDrift"`
 	Standards       StandardsSignal   `json:"standards"`
+	PRFlow          *PRFlowSignal     `json:"prFlow,omitempty"`
 }
 
 type NarrativeBullet struct {
@@ -347,15 +392,17 @@ type RollingPoint struct {
 // --- CLI options ---
 
 type CliOptions struct {
-	Window     int
-	Output     string
-	Open       bool
-	Since      string
-	Ignore     []string
-	JSON       string
-	Compare    string
-	Markdown   string
-	NoSnapshot bool
+	Window       int
+	Output       string
+	Open         bool
+	Since        string
+	Ignore       []string
+	JSON         string
+	Compare      string
+	Markdown     string
+	NoSnapshot   bool
+	GitHubToken  string // optional; falls back to GITHUB_TOKEN env var
+	GitHubRepo   string // optional owner/name override when origin URL is ambiguous
 }
 
 // --- Delta (compare) ---

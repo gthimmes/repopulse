@@ -33,6 +33,7 @@ func RenderHTML(data types.MoodResult, meta types.RepoMeta, delta *types.MoodDel
 	}
 	bugWhyHTML := renderBugExplainability(data.Signals.BugRatio)
 	standardsHTML := renderStandards(data.Signals.Standards)
+	prFlowHTML := renderPRFlow(data.Signals.PRFlow)
 	trendSectionHTML := TrendSection(trends)
 	trendInit := ""
 	if len(trends) > 1 {
@@ -128,6 +129,9 @@ func RenderHTML(data types.MoodResult, meta types.RepoMeta, delta *types.MoodDel
     %s
 
     <!-- Standards (Plank 2) -->
+    %s
+
+    <!-- PR Flow (Phase 3.1 — GitHub PR metrics, if token wired up) -->
     %s
 
     <!-- Stats Row -->
@@ -250,6 +254,7 @@ func RenderHTML(data types.MoodResult, meta types.RepoMeta, delta *types.MoodDel
 		narrativeHTML,
 		trendSectionHTML,
 		standardsHTML,
+		prFlowHTML,
 		meta.AnalyzedCommits, meta.WindowDays,
 		formatThousands(filesTouched), data.Signals.FileChurn.EligibleFileCount,
 		bugPct, data.Signals.BugRatio.ChaosCommitCount,
@@ -687,6 +692,93 @@ func highestDriftSeverity(flags []types.DriftFlag) string {
 		return "info"
 	}
 	return bestSev
+}
+
+// renderPRFlow emits the "PR Flow" card surfacing GitHub PR metrics.
+// Renders nothing when the signal is absent (no token configured or
+// fetch failed); the rest of the report stays valid without it.
+func renderPRFlow(p *types.PRFlowSignal) string {
+	if p == nil || p.MergedPRs == 0 {
+		return ""
+	}
+
+	// Banner when we served cached-only due to rate-limit.
+	banner := ""
+	if p.CacheBanner != "" {
+		banner = fmt.Sprintf(`<div class="pr-banner">&#x26A0;&#xFE0F; %s</div>`, escapeHTML(p.CacheBanner))
+	}
+
+	// Top reviewers bar list.
+	var revRows strings.Builder
+	for _, r := range p.Reviewers {
+		barColor := pctColor2(100 - r.SharePct) // higher share = warmer bar (concentration = risk)
+		fmt.Fprintf(&revRows, `<li class="std-author-row">
+        <span class="std-author-name" title="%s">%s</span>
+        <span class="std-author-bar"><span style="width:%.0f%%;background:%s"></span></span>
+        <span class="std-author-pct">%d reviews <span class="dim">(%.0f%%)</span></span>
+      </li>`,
+			escapeHTML(r.Login), escapeHTML(r.Login),
+			r.SharePct, barColor,
+			r.ReviewCount, r.SharePct)
+	}
+
+	// Rubber-stamp drill-down.
+	rubberPanel := ""
+	if len(p.RubberStamps) > 0 {
+		var lis strings.Builder
+		for _, s := range p.RubberStamps {
+			fmt.Fprintf(&lis, `<li>
+          <span class="pr-num">#%d</span>
+          <span class="pr-author">%s</span>
+          <span class="pr-cycle">%.1fh</span>
+          <span class="pr-title" title="%s">%s</span>
+        </li>`,
+				s.Number,
+				escapeHTML(s.Author),
+				s.CycleHours,
+				escapeHTML(s.Title),
+				escapeHTML(shorten(s.Title, 90)))
+		}
+		rubberPanel = fmt.Sprintf(`<details class="std-samples">
+        <summary><span class="chevron">&#x25B6;</span> rubber-stamped PRs (%d shown)</summary>
+        <ul class="pr-samples">%s</ul>
+      </details>`, len(p.RubberStamps), lis.String())
+	}
+
+	return fmt.Sprintf(`<div class="card" style="margin-bottom:24px">
+      <h2>PR Flow <span class="section-sub">&middot; %s &middot; %d merged PRs in %dd</span></h2>
+      %s
+      <div class="pr-headlines">
+        <div class="pr-headline">
+          <div class="pr-num-big">%.1fh</div>
+          <div class="pr-label">P50 cycle time<span class="sublabel">p75 %.1fh &middot; p95 %.1fh</span></div>
+        </div>
+        <div class="pr-headline">
+          <div class="pr-num-big">%.1fh</div>
+          <div class="pr-label">P50 time-to-first-review<span class="sublabel">p75 %.1fh</span></div>
+        </div>
+        <div class="pr-headline">
+          <div class="pr-num-big" style="color:%s">%.0f%%</div>
+          <div class="pr-label">Rubber-stamp rate<span class="sublabel">approved &lt;60s, no comments</span></div>
+        </div>
+        <div class="pr-headline">
+          <div class="pr-num-big">%.0f%%</div>
+          <div class="pr-label">Self-merge rate<span class="sublabel">author merged own PR</span></div>
+        </div>
+      </div>
+      <div class="std-section-h">Top reviewers (workload concentration)</div>
+      <ul class="std-author-list">%s</ul>
+      %s
+    </div>`,
+		escapeHTML(p.OwnerRepo), p.MergedPRs, p.WindowDays,
+		banner,
+		p.CycleHours.P50, p.CycleHours.P75, p.CycleHours.P95,
+		p.TTFRHours.P50, p.TTFRHours.P75,
+		pctColor(100-p.RubberStampRate), p.RubberStampRate,
+		p.SelfMergeRate,
+		revRows.String(),
+		rubberPanel,
+	)
 }
 
 // renderStandards is the Plank-2 deterministic-standards card. Two

@@ -17,6 +17,7 @@ No AI. No external APIs. Pure git data + math + Chart.js output.
 - Trend chart in HTML report: `internal/render/trends.go` reads the store and renders a multi-series Chart.js line (composite shown by default, 5 per-signal series legend-toggleable).
 - **Plank 1 — baseline drift:** `internal/baseline/` compares each contributor against their own 6×-window historical baseline on commit cadence, weekend/night %, and fix-vs-feature mix. Flagged deltas render in a "Worth a 1:1" card. No cross-author ranking — ever.
 - **Plank 2 — standards detection (deterministic layer):** `internal/standards/` computes conventional-commit compliance + test density (test-files-per-source ratio per module) from commit messages and HEAD's tracked files. Rendered in a "Standards" card. AI enrichment layer is on the roadmap but not built.
+- **Phase 3.1 — PR Flow:** `internal/github/` (REST client + cache) + `internal/prmetrics/` (signal math). Gated on a GitHub token (`--github-token` flag or `GITHUB_TOKEN` env var). Produces cycle-time percentiles, time-to-first-review, reviewer concentration, rubber-stamp rate, self-merge rate. Cache lives at `<repo>/.repopulse/pr-cache/` and is incrementally refreshed (only refetch PRs whose `updated_at` changed). Rate-limit hits fall back to cached data with a banner.
 - **Plank 3 — exploration:** Top Churned Files is a drillable `<details>` list (per-file authors + recent bug-tagged commits). **Contributors explorer** at the bottom of the report — full unbounded list of every contributor in the window, sorted by LOC desc, scrollable, drillable. Each row's expanded panel shows stats, baseline-drift detail (or "no flags this window"), conventional-commit compliance bar, and top-touched files. Drift-flagged contributors get an alert/watch pill in the Watch? column. Folds in what used to be the standalone Worth-a-1:1 card. See `renderContributorsSection` and `renderChurnDetail` in `internal/render/template.go`.
 - **Badge redesign:** "REPO PRESSURE" headline + numeric score + band pill (Steady/Active/Volatile) + horizontal gradient bar with marker. The emoji + mood label are gone from the report; the same emoji is still emitted in the CLI summary line and markdown digest as a quick visual cue.
 - Fixture generator for the Playwright e2e tests: `cmd/fixture-gen/main.go`
@@ -55,6 +56,8 @@ repopulse/
 │   ├── snapshots/      # Phase 2.1 persistent store: save/load/prune `.repopulse/snapshots/`
 │   ├── baseline/       # Plank 1: per-author drift vs their own historical baseline
 │   ├── standards/      # Plank 2 deterministic: conventional-commit compliance + test density
+│   ├── github/         # Phase 3.1: REST client + PR fetcher + on-disk cache
+│   ├── prmetrics/      # Phase 3.1: cycle-time / reviewer / rubber-stamp signal math
 │   ├── signals/        # per-signal computations
 │   │   ├── frequency.go    # Commit cadence
 │   │   ├── churn.go        # Churn density + throughput

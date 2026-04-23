@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -19,7 +20,9 @@ import (
 	"repopulse/internal/compare"
 	"repopulse/internal/config"
 	"repopulse/internal/git"
+	ghfetch "repopulse/internal/github"
 	"repopulse/internal/narrative"
+	"repopulse/internal/prmetrics"
 	"repopulse/internal/render"
 	"repopulse/internal/scorer"
 	"repopulse/internal/signals"
@@ -50,6 +53,8 @@ func main() {
 	cmpPath := fs.String("compare", "", "Previous JSON snapshot to diff against")
 	markdownOut := fs.String("markdown", "", "Also write a markdown digest")
 	noSnapshot := fs.Bool("no-snapshot", false, "Skip the automatic .repopulse/snapshots/ entry")
+	ghToken := fs.String("github-token", "", "GitHub personal-access token for PR metrics (falls back to GITHUB_TOKEN env var)")
+	ghRepo := fs.String("github-repo", "", "Override owner/name for PR metrics when origin URL is ambiguous")
 
 	if len(os.Args) < 2 {
 		fs.Usage()
@@ -68,7 +73,9 @@ func main() {
 		JSON:       *jsonOut,
 		Compare:    *cmpPath,
 		Markdown:   *markdownOut,
-		NoSnapshot: *noSnapshot,
+		NoSnapshot:  *noSnapshot,
+		GitHubToken: firstNonEmpty(*ghToken, os.Getenv("GITHUB_TOKEN")),
+		GitHubRepo:  *ghRepo,
 	}
 
 	if err := run(repoPathRaw, opts); err != nil {
@@ -184,6 +191,11 @@ func run(repoPathRaw string, opts types.CliOptions) error {
 	}
 	standardsSig := standards.Compute(commits, allFiles)
 
+	// Phase 3.1 — PR flow. Gated on a GitHub token being available.
+	// No token → no PR section (the report still works for offline
+	// analysis). Rate-limit hits fall back to cached PRs + banner.
+	prFlow := computePRFlow(repoPath, opts, effectiveWindowDays, windowStart)
+
 	base := scorer.ComputeMood(scorer.Input{
 		CommitFrequency: freq,
 		FileChurn:       churn,
@@ -196,6 +208,9 @@ func run(repoPathRaw string, opts types.CliOptions) error {
 	})
 	base.Signals.AuthorDrift = authorDrift
 	base.Signals.Standards = standardsSig
+	if prFlow != nil {
+		base.Signals.PRFlow = prFlow
+	}
 	meta := types.RepoMeta{
 		RepoName:          filepath.Base(repoPath),
 		RepoPath:          repoPath,
@@ -334,4 +349,59 @@ func writeFileMkdir(path string, data []byte) error {
 		return err
 	}
 	return os.WriteFile(path, data, 0644)
+}
+
+func firstNonEmpty(a, b string) string {
+	if strings.TrimSpace(a) != "" {
+		return a
+	}
+	return b
+}
+
+// computePRFlow does the full PR flow pass: resolve owner/repo, fetch
+// merged PRs in the window, compute metrics. Returns nil (and logs a
+// warning) when the token is absent, the remote isn't GitHub, or the
+// fetch fails irrecoverably.
+func computePRFlow(repoPath string, opts types.CliOptions, windowDays int, windowStart time.Time) *types.PRFlowSignal {
+	if opts.GitHubToken == "" && opts.GitHubRepo == "" {
+		return nil // offline / no-token mode; silently skip
+	}
+
+	var ownerRepo ghfetch.OwnerRepo
+	if opts.GitHubRepo != "" {
+		parts := strings.SplitN(opts.GitHubRepo, "/", 2)
+		if len(parts) != 2 {
+			fmt.Fprintf(os.Stderr, "Warning: --github-repo must be owner/name, got %q\n", opts.GitHubRepo)
+			return nil
+		}
+		ownerRepo = ghfetch.OwnerRepo{Owner: parts[0], Name: parts[1]}
+	} else {
+		detected, err := ghfetch.DetectOwnerRepo(repoPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not detect GitHub owner/repo: %v\n", err)
+			return nil
+		}
+		ownerRepo = detected
+	}
+
+	cacheDir := filepath.Join(repoPath, ".repopulse", "pr-cache")
+	client := ghfetch.NewClient(opts.GitHubToken)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	res, err := ghfetch.FetchMergedPRs(ctx, client, ghfetch.FetchOptions{
+		Owner:    ownerRepo.Owner,
+		Repo:     ownerRepo.Name,
+		Since:    windowStart,
+		CacheDir: cacheDir,
+		MaxPRs:   1000,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: PR fetch failed: %v\n", err)
+		return nil
+	}
+
+	sig := prmetrics.Compute(res.PRs, ownerRepo.String(), windowDays, prmetrics.Options{})
+	sig.CacheBanner = res.CacheBanner
+	return &sig
 }
