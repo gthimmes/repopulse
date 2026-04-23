@@ -105,6 +105,19 @@ ignore patterns and bug-tier keywords for your team's workflow.
   Prefix an entry with `!` to remove a default (e.g. `"!workaround"` drops
   `workaround` from the normal tier). Built-in defaults live in
   `internal/config/config.go:DefaultBugKeywords`.
+- `commitPattern` — regex applied to commit subject lines for the
+  compliance signal. Default is Conventional Commits
+  (`type(scope?)!?: subject`). Override when your team uses a different
+  convention — e.g. a Jira-style ticket prefix:
+  ```json
+  {
+    "commitPattern": "^(?i)((feat|fix|chore|docs?|refactor|tests?|ci|build|perf|revert)(\\([^)]*\\))?!?:|(\\[?[A-Z]+-\\d+\\]?[\\s:-]+)+)\\S"
+  }
+  ```
+  This accepts either Conventional Commits prefixes OR one-or-more
+  ticket references (`[TICKET-1234]`, `TICKET-1234:`, `TICKET-1234 `, or
+  repeated) followed by any non-whitespace content. Invalid regex falls
+  back to the default with a stderr warning.
 
 The classifier also respects Conventional-Commit prefixes: subjects
 starting with `feat:`, `chore:`, `docs:`, `style:`, `test:`, `refactor:`,

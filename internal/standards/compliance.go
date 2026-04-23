@@ -16,28 +16,19 @@ import (
 	"repopulse/internal/types"
 )
 
-// conventionalCommitRE matches the Conventional Commits subject grammar:
-//
-//	type(scope?)!?: subject
-//
-// Type list mirrors the same prefix set the bug classifier vetoes
-// (feat/fix/chore/docs/style/test/refactor/ci/build/perf/revert), with
-// a couple of common synonyms allowed.
-var conventionalCommitRE = regexp.MustCompile(
-	`^(?i)(feat|feature|fix|chore|docs?|style|tests?|refactor|ci|build|perf|revert)(\([^)]*\))?!?:\s+\S`,
-)
-
 // MaxNonCompliantSamples caps how many bad subjects we keep on hand for
 // the report drill-down. Trimmed to the most recent N per the order
 // commits arrive (newest first, per the existing collector contract).
 const MaxNonCompliantSamples = 12
 
-// ComputeConventionalCommits walks the commits and emits a compliance
+// ComputeCommitCompliance walks the commits and emits a compliance
 // breakdown — overall %, per-author %, and a small sample of subjects
-// that didn't match for drill-down context. Merge commits and reverts
-// are *included* in the denominator: a "Merge pull request #123" subject
+// that didn't match the pattern. `pattern` is the effective regex the
+// team has chosen (Conventional Commits by default, or whatever they
+// declared in `.repopulserc`). Merge commits and reverts are *included*
+// in the denominator on purpose: a "Merge pull request #123" subject
 // is itself a standards violation worth surfacing.
-func ComputeConventionalCommits(commits []types.CommitRecord) types.ConventionalCommitsResult {
+func ComputeCommitCompliance(commits []types.CommitRecord, pattern *regexp.Regexp) types.ConventionalCommitsResult {
 	if len(commits) == 0 {
 		return types.ConventionalCommitsResult{}
 	}
@@ -62,7 +53,7 @@ func ComputeConventionalCommits(commits []types.CommitRecord) types.Conventional
 		}
 		a.total++
 
-		if conventionalCommitRE.MatchString(subject) {
+		if pattern.MatchString(subject) {
 			a.compliant++
 			totalCompliant++
 			continue

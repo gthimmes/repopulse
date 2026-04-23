@@ -256,6 +256,11 @@ type ConventionalCommitsResult struct {
 	CompliancePct       float64                 `json:"compliancePct"`
 	PerAuthor           []AuthorComplianceEntry `json:"perAuthor"`
 	NonCompliantSamples []NonCompliantCommit    `json:"nonCompliantSamples"`
+	// Pattern is the effective regex for this run — empty string means
+	// the built-in Conventional Commits default was used, non-empty is
+	// whatever the team declared in `.repopulserc`. Surfaced in the UI
+	// subtitle so the user can see which pattern is in effect.
+	Pattern string `json:"pattern,omitempty"`
 }
 
 type AuthorComplianceEntry struct {

@@ -7,10 +7,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
 )
+
+// DefaultCommitPattern is the Conventional Commits regex used when the
+// repo hasn't declared its own convention in `.repopulserc`. Matches
+// `type(scope?)!?: subject` where type is one of the common set.
+const DefaultCommitPattern = `^(?i)(feat|feature|fix|chore|docs?|style|tests?|refactor|ci|build|perf|revert)(\([^)]*\))?!?:\s+\S`
 
 // DefaultIgnorePatterns match paths that dominate churn but aren't hand-written code.
 var DefaultIgnorePatterns = []string{
@@ -83,6 +89,12 @@ type BugKeywords struct {
 type RepopulseConfig struct {
 	Ignore      []string     `json:"ignore,omitempty"`
 	BugKeywords *BugKeywords `json:"bugKeywords,omitempty"`
+	// CommitPattern is a Go regex applied to commit subject lines for
+	// the compliance signal. Teams that use a convention other than
+	// Conventional Commits (e.g. `[TICKET-1234] Verb …`) can declare
+	// their shape here and have the signal measure adherence to that.
+	// Empty string → fall back to the built-in Conventional-Commits regex.
+	CommitPattern string `json:"commitPattern,omitempty"`
 }
 
 // LoadConfig reads .repopulserc from the repo. Missing file → empty config.
@@ -136,6 +148,23 @@ func ResolvedBugKeywords(cfg RepopulseConfig) BugKeywords {
 		out.Routine = mergeKeywords(out.Routine, cfg.BugKeywords.Routine)
 	}
 	return out
+}
+
+// ResolvedCommitPattern returns the compiled regex the compliance
+// signal should use. Preference order: user's custom pattern → default.
+// Invalid user regex → warn to stderr and fall back to default rather
+// than failing the whole run. Also returns the raw pattern string so
+// the renderer can show it in the report subtitle.
+func ResolvedCommitPattern(cfg RepopulseConfig) (*regexp.Regexp, string, bool) {
+	if cfg.CommitPattern != "" {
+		re, err := regexp.Compile(cfg.CommitPattern)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: .repopulserc commitPattern invalid, falling back to default: %v\n", err)
+		} else {
+			return re, cfg.CommitPattern, true
+		}
+	}
+	return regexp.MustCompile(DefaultCommitPattern), DefaultCommitPattern, false
 }
 
 func normalizePath(p string) string {

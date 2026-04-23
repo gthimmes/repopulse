@@ -25,7 +25,7 @@ test.describe('Real-data manual verification', () => {
   test('Standards card shows compliance + test density', async ({ page }) => {
     await page.goto('file://' + reportPath);
     const card = page.locator('.card').filter({ hasText: 'Standards' }).first();
-    await expect(card).toContainText('Conventional commits');
+    await expect(card).toContainText('Commit compliance');
     await expect(card).toContainText('Test density');
   });
 

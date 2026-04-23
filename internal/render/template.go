@@ -842,18 +842,28 @@ func renderConventionalCommits(c types.ConventionalCommitsResult) string {
 		)
 	}
 
+	// Subtitle reflects whichever pattern is in effect. Default case
+	// keeps the Conventional Commits phrasing (most users); custom
+	// pattern surfaces the actual regex so there's no ambiguity
+	// about what's being measured.
+	patternLine := fmt.Sprintf(`%d of %d commits in this window match <code>type(scope?)!?: subject</code> (Conventional Commits).`, c.Compliant, c.Total)
+	if c.Pattern != "" {
+		patternLine = fmt.Sprintf(`%d of %d commits match your team's pattern <code>%s</code> (configured in <code>.repopulserc</code>).`,
+			c.Compliant, c.Total, escapeHTML(c.Pattern))
+	}
+
 	return fmt.Sprintf(`<div class="standards-card">
       <div class="std-head">
-        <div class="std-title">Conventional commits</div>
+        <div class="std-title">Commit compliance</div>
         <div class="std-pct" style="color:%s">%.1f%%</div>
       </div>
-      <div class="std-sub">%d of %d commits in this window match <code>type(scope?)!?: subject</code>.</div>
+      <div class="std-sub">%s</div>
       <div class="std-section-h">Per-author (≥3 commits, sorted lowest first)</div>
       <ul class="std-author-list">%s</ul>
       %s
     </div>`,
 		pctColor, c.CompliancePct,
-		c.Compliant, c.Total,
+		patternLine,
 		perAuthor.String(),
 		conditionalNonCompliantPanel(samples.String()),
 	)

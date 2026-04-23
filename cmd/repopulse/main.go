@@ -189,7 +189,18 @@ func run(repoPathRaw string, opts types.CliOptions) error {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not list files for test-density analysis: %v\n", err)
 	}
-	standardsSig := standards.Compute(commits, allFiles)
+	commitPattern, commitPatternSource, commitPatternCustom := config.ResolvedCommitPattern(cfg)
+	// Only pass the pattern string to the renderer when it's custom;
+	// the default-case UI reads "Conventional Commits" rather than
+	// showing the regex itself.
+	sourceForUI := ""
+	if commitPatternCustom {
+		sourceForUI = commitPatternSource
+	}
+	standardsSig := standards.Compute(commits, allFiles, standards.Options{
+		CommitPattern:       commitPattern,
+		CommitPatternSource: sourceForUI,
+	})
 
 	// Phase 3.1 — PR flow. Gated on a GitHub token being available.
 	// No token → no PR section (the report still works for offline

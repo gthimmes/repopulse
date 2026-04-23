@@ -88,6 +88,47 @@ func TestResolvedBugKeywords_DuplicatesCollapseCaseInsensitive(t *testing.T) {
 	}
 }
 
+func TestResolvedCommitPattern_DefaultWhenAbsent(t *testing.T) {
+	re, src, custom := ResolvedCommitPattern(RepopulseConfig{})
+	if custom {
+		t.Errorf("expected default-path when no CommitPattern set")
+	}
+	if src != DefaultCommitPattern {
+		t.Errorf("expected default pattern string")
+	}
+	if !re.MatchString("feat: add foo") {
+		t.Errorf("default regex should match a Conventional Commit")
+	}
+}
+
+func TestResolvedCommitPattern_UsesCustom(t *testing.T) {
+	cfg := RepopulseConfig{CommitPattern: `^\[[A-Z]+-\d+\] (Fix|Feature)\s`}
+	re, src, custom := ResolvedCommitPattern(cfg)
+	if !custom {
+		t.Errorf("expected custom-path when CommitPattern set")
+	}
+	if src != cfg.CommitPattern {
+		t.Errorf("source string should echo the custom pattern")
+	}
+	if !re.MatchString("[TICKET-1234] Fix login flow") {
+		t.Errorf("custom regex should match team commits")
+	}
+	if re.MatchString("feat: add foo") {
+		t.Errorf("custom regex should NOT match Conventional Commits style")
+	}
+}
+
+func TestResolvedCommitPattern_FallsBackOnInvalid(t *testing.T) {
+	cfg := RepopulseConfig{CommitPattern: `[unterminated group`}
+	re, _, custom := ResolvedCommitPattern(cfg)
+	if custom {
+		t.Errorf("invalid regex should fall back to default, not be marked custom")
+	}
+	if !re.MatchString("feat: add foo") {
+		t.Errorf("fallback regex should be the default Conventional Commits pattern")
+	}
+}
+
 func TestResolvedBugKeywords_EmptyOverrideKeepsDefaults(t *testing.T) {
 	cfg := RepopulseConfig{BugKeywords: &BugKeywords{}}
 	got := ResolvedBugKeywords(cfg)
