@@ -16,7 +16,8 @@ No AI. No external APIs. Pure git data + math + Chart.js output.
 - Persistent snapshot store: `internal/snapshots/` writes `<repo>/.repopulse/snapshots/<ts>.json` every run, capped at 365, gitignore auto-laid. Opt out with `-no-snapshot`.
 - Trend chart in HTML report: `internal/render/trends.go` reads the store and renders a multi-series Chart.js line (composite shown by default, 5 per-signal series legend-toggleable).
 - **Plank 1 — baseline drift:** `internal/baseline/` compares each contributor against their own 6×-window historical baseline on commit cadence, weekend/night %, and fix-vs-feature mix. Flagged deltas render in a "Worth a 1:1" card. No cross-author ranking — ever.
-- **Plank 2 — standards detection (deterministic layer):** `internal/standards/` computes commit-pattern compliance (Conventional Commits by default, configurable via `.repopulserc`'s `commitPattern` regex) + test density (test-files-per-source ratio per module). Rendered in a "Standards" card. AI enrichment layer is on the roadmap but not built.
+- **Plank 2 — standards detection (deterministic layer):** `internal/standards/` computes commit-pattern compliance (Conventional Commits by default, configurable via `.repopulserc`'s `commitPattern` regex) + test density (test-files-per-source ratio per module). Rendered in a "Standards" card.
+- **Plank 2 Layer B — AI enrichment:** `internal/enrich/` produces an optional `EnrichmentResult` (narrative bullets, standards verdict, per-author drift readings) on top of the deterministic snapshot. Three modes: **A** (no AI, default — exactly the same report as before), **B** (`--enrich` flag, gated on `ANTHROPIC_API_KEY` env var; calls `api.anthropic.com/v1/messages` directly with stdlib HTTP, caches at `<repo>/.repopulse/enrichment-cache/` keyed by snapshot+model hash so identical inputs don't get re-billed), **C** (a Claude Code skill at `skills/repopulse-enrich.md` produces `enriched.json` in-conversation, fed back via `--enriched`; no API key required). Pipeline split also lives here: `--emit-json` writes the deterministic snapshot, `--from-json` renders from one without re-collecting. The renderer's `renderEnrichment()` paints a purple-bordered "AI read" card with an `AI-GENERATED` tag — visually distinct so a reader can always tell interpretation from measurement. Network/auth/parse failures only warn; the deterministic report still renders.
 - **Phase 3.1 — PR Flow:** `internal/github/` (REST client + cache) + `internal/prmetrics/` (signal math). Gated on a GitHub token (`--github-token` flag or `GITHUB_TOKEN` env var). Produces cycle-time percentiles, time-to-first-review, reviewer concentration, rubber-stamp rate, self-merge rate. Cache lives at `<repo>/.repopulse/pr-cache/` and is incrementally refreshed (only refetch PRs whose `updated_at` changed). Rate-limit hits fall back to cached data with a banner.
 - **Plank 3 — exploration:** Top Churned Files is a drillable `<details>` list (per-file authors + recent bug-tagged commits). **Contributors explorer** at the bottom of the report — full unbounded list of every contributor in the window, sorted by LOC desc, scrollable, drillable. Each row's expanded panel shows stats, baseline-drift detail (or "no flags this window"), conventional-commit compliance bar, and top-touched files. Drift-flagged contributors get an alert/watch pill in the Watch? column. Folds in what used to be the standalone Worth-a-1:1 card. See `renderContributorsSection` and `renderChurnDetail` in `internal/render/template.go`.
 - **Badge redesign:** "REPO PRESSURE" headline + numeric score + band pill (Steady/Active/Volatile) + horizontal gradient bar with marker. The emoji + mood label are gone from the report; the same emoji is still emitted in the CLI summary line and markdown digest as a quick visual cue.
@@ -47,15 +48,18 @@ Do NOT build a dev server, web app, or anything requiring a running process to v
 repopulse/
 ├── cmd/
 │   ├── repopulse/main.go          # Primary CLI entry point
-│   └── fixture-gen/main.go        # Test-only: writes the Playwright fixture HTML
+│   └── fixture-gen/main.go        # Test-only: writes the Playwright fixture HTML (--enriched optional)
+├── skills/
+│   └── repopulse-enrich.md        # Mode C: Claude Code skill producing enriched.json in-conversation
 ├── internal/
-│   ├── types/          # Shared structs
+│   ├── types/          # Shared structs (incl. EnrichmentResult)
 │   ├── git/            # git log invocation + parser
 │   ├── config/         # ignore patterns + bug-keyword tiers
 │   ├── codeowners/     # CODEOWNERS parser, path matcher
 │   ├── snapshots/      # Phase 2.1 persistent store: save/load/prune `.repopulse/snapshots/`
 │   ├── baseline/       # Plank 1: per-author drift vs their own historical baseline
 │   ├── standards/      # Plank 2 deterministic: conventional-commit compliance + test density
+│   ├── enrich/         # Plank 2 Layer B: Anthropic Messages client + prompt builder + cache
 │   ├── github/         # Phase 3.1: REST client + PR fetcher + on-disk cache
 │   ├── prmetrics/      # Phase 3.1: cycle-time / reviewer / rubber-stamp signal math
 │   ├── signals/        # per-signal computations
@@ -125,9 +129,21 @@ Both suites should be green before making changes.
 ./repopulse.exe /path/to/repo                                    # writes output/repopulse-report.html
 ./repopulse.exe /path/to/repo -markdown output/digest.md         # HTML + markdown digest
 ./repopulse.exe /path/to/repo -json output/snap.json -open       # HTML + JSON snapshot + auto-open
+
+# Plank 2 Layer B — AI enrichment:
+./repopulse.exe /path/to/repo -enrich                            # Mode B: API key in $ANTHROPIC_API_KEY
+./repopulse.exe /path/to/repo -emit-json output/det.json         # collect → write deterministic snapshot
+./repopulse.exe -from-json output/det.json -enriched out/ai.json # render from deterministic + enriched
 ```
 
-Full flag list: `./repopulse.exe --help`.
+Full flag list: `./repopulse.exe --help`. Notable flags for the pipeline split:
+
+- `-emit-json <path>` — write the deterministic snapshot post-collect, pre-render. Inputs to a Mode-C skill.
+- `-from-json <path>` — skip collect entirely; render from a previously-emitted snapshot.
+- `-enriched <path>` — layer an `enriched.json` (Plank-2 Layer-B output) on top of either path.
+- `-enrich` — call the Anthropic API after collect (requires `ANTHROPIC_API_KEY` or `--anthropic-api-key`).
+- `-anthropic-api-key <key>` — explicit override; falls back to `ANTHROPIC_API_KEY` env var.
+- `-enrich-model <id>` — override the Claude model id (default: `claude-sonnet-4-6`).
 
 ---
 
@@ -158,8 +174,8 @@ Two suites, both green:
 
 | Suite | Count | Command | Notes |
 |-------|-------|---------|-------|
-| Go unit | 117 | `go test ./internal/...` | Pure math verification over deterministic fixtures |
-| Playwright e2e | 31 | `npx playwright test` | Drives a real browser against fixture + real-data reports |
+| Go unit | ~150 | `go test ./internal/...` | Pure math verification over deterministic fixtures (incl. enrich package) |
+| Playwright e2e | 36 | `npx playwright test` | Drives a real browser against fixture + real-data reports (incl. enrichment AI-card spec) |
 
 Playwright requires `fixture-gen.exe` to be built first — `tests/e2e/fixtures.ts` execs it to produce the fixture HTML. `playwright.config.ts` does not currently auto-build; add a `globalSetup` hook when this becomes friction.
 
@@ -205,6 +221,13 @@ Fetches a baseline window 6× the current window (non-overlapping, immediately p
 
 ### Plank 2 standards detection (internal/standards)
 Two deterministic signals today: conventional-commit compliance (regex over subject lines, `type(scope?)!?: subject`) and test density (in `colocation.go` — filename kept for legacy). Density classifies every tracked file under a known language as EITHER a test (by filename suffix like `*Test.kt`, `*_test.go`, `*.test.ts` — OR by presence under a conventional test-source path like `/src/test/`, `/__tests__/`) or a source, then emits `test_count / source_count * 100` per module. Intentionally ratio-based rather than filename-matching: catches "does this module have tests at all" without false negatives when a team splits tests by action (e.g. `FooServiceCreateTest.kt` for source `FooService.kt`) or uses integration-test suites. Density can exceed 100% for healthy test-heavy codebases. Walks `git ls-files` at HEAD so the result reflects the whole repo, not just files touched in the window. Module breakdown uses the same top-level-dir convention as the existing modules signal.
+
+### Plank 2 Layer B AI enrichment (internal/enrich)
+Adds optional AI-authored interpretation on top of the deterministic snapshot. The `EnrichmentResult` shape (in `internal/types`) carries up to four fields: narrative bullets, a standards verdict, per-author drift readings, and free-form notes — all optional, all rendered only when present. `enrich.Run()` is the API entry: it builds a compact text digest of aggregate signals (NEVER raw code or full commit lists), POSTs to `api.anthropic.com/v1/messages` via stdlib HTTP (no SDK dependency), parses the response (tolerates `\`\`\`json`-fenced output), and writes a cached copy keyed by `sha256(digest + model + schemaVersion)`. Cache hits skip the network call entirely so re-runs of an unchanged snapshot don't get re-billed. `enrich.BuildPrompt()` is exported so the Mode-C skill can use the same prompt body without going through the API. Failure modes (no key, network down, non-2xx, malformed JSON) all return errors that the caller logs as warnings and proceeds without enrichment — the deterministic report is the source of truth and must always render.
+
+The renderer (`renderEnrichment` in `internal/render/template.go`) lays down a single dedicated card between Findings and the rest of the report. Card is purple-tinted with an `AI-GENERATED` tag and a one-line "interpretation only, deterministic numbers above are the source of truth" subtitle so a reader can never confuse this with measurement. Drift entries match back to contributors by case-insensitive email so the displayed name comes from the deterministic Authors signal, not from whatever the model invented.
+
+Three modes are documented in `skills/repopulse-enrich.md` (Mode C — the Claude Code skill). The skill explains how to read the deterministic snapshot, produce JSON matching the `EnrichmentResult` shape, and feed it back via `--from-json` + `--enriched`. Mode B (`--enrich` with `ANTHROPIC_API_KEY`) is end-to-end automated; Mode A is just running the binary normally — the deterministic report renders unchanged.
 
 ---
 

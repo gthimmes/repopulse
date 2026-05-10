@@ -18,7 +18,8 @@ Both lenses emit **things to look at**, not scores to rank against. The mood bad
 - ✅ **Snapshot store + trend chart shipped** (was "Phase 2.1 + 2.2"). Every run writes `<repo>/.repopulse/snapshots/<ts>.json`; the HTML report carries a multi-series trend line.
 - ✅ **UX polish shipped** this cycle: header shows date range + "0 = calm / 100 = chaotic / lower is better," bug-tier explainer legend, conventional-commit prefix veto (`feat:`/`chore:`/etc. never classify as bugs), `.repopulserc` now appends keywords to defaults instead of replacing, full rebrand `mood-ring → repopulse`.
 - ✅ **Plank 1 shipped** this cycle: per-author baseline drift. Each contributor compared against their own rolling 6×-window baseline on commit cadence, weekend/night %, and fix-vs-feature mix. Flagged deltas surface in a "Worth a 1:1" card with alert/watch/info severity. No cross-author ranking anywhere. See `internal/baseline/`.
-- ✅ **Plank 2 shipped** this cycle (deterministic layer): conventional-commit compliance + test density (test-file-to-source ratio per module). Earlier attempt at filename-based colocation was replaced with a density ratio because filename matching required teams to name tests after individual source classes — too brittle across real-world test-organization conventions. Languages auto-detected from HEAD's tracked files. AI enrichment layer for plank 2 still pending. See `internal/standards/`.
+- ✅ **Plank 2 shipped** this cycle (deterministic layer): conventional-commit compliance + test density (test-file-to-source ratio per module). Earlier attempt at filename-based colocation was replaced with a density ratio because filename matching required teams to name tests after individual source classes — too brittle across real-world test-organization conventions. Languages auto-detected from HEAD's tracked files. See `internal/standards/`.
+- ✅ **Plank 2 Layer B shipped** this cycle (AI enrichment): the deterministic snapshot can now be augmented with AI-authored interpretation — narrative bullets, a standards verdict, and per-author drift readings phrased as coaching context. Three modes: **A** (no AI, default), **B** (`--enrich` calls `api.anthropic.com/v1/messages` when `ANTHROPIC_API_KEY` is set; results cached at `<repo>/.repopulse/enrichment-cache/` keyed by snapshot+model hash), **C** (a Claude Code skill at `skills/repopulse-enrich.md` produces `enriched.json` in-conversation, no API key). The pipeline split also landed: `--emit-json` writes the deterministic snapshot, `--from-json` renders from one without re-collecting, `--enriched` layers an enrichment file on top. Enrichment is purely additive — when absent or when the API call fails, the report renders unchanged with a clear stderr warning. The AI-read card is visually distinct (purple-tinted) and labeled `AI-GENERATED` so a reader can always tell interpretation from measurement. See `internal/enrich/`, `cmd/repopulse/main.go`, `renderEnrichment` in `internal/render/template.go`.
 - ✅ **Plank 3 shipped** this cycle: Top Churned Files now drillable (per-author chips + recent commits with bug-tier color coding inside `<details>` rows). New **Contributors explorer** at the bottom of the report — full unbounded list of every contributor in the window, sorted by LOC desc, scrollable, drillable. Each row's expanded panel shows: stats grid, baseline-drift detail (or "no flags this window"), conventional-commit compliance bar, top files they touched. Folds in what was previously the standalone "Worth a 1:1" card — flagged contributors get an inline alert/watch pill in the row's Watch? column. The earlier `--me` flag and personal-mirror banner were removed; an engineer just opens the report and finds themselves in the contributor list. See `renderContributorsSection` in `internal/render/template.go`.
 - ✅ **Badge redesign shipped** this cycle: dropped the calm/anxious/chaotic emoji + mood label. Replaced with a "REPO PRESSURE" headline, large numeric score, color-coded band pill (Steady 0-40 / Active 41-70 / Volatile 71-100), and a horizontal gradient bar (green→amber→red) with a marker showing where this run lands. Same scoring math, more honest framing — the score isn't really mood, it's a weighted composite of churn density + bug-tier ratio + off-hours load + bus factor + coverage.
 - ✅ **Configurable commit compliance** this cycle: `.repopulserc` now takes a `commitPattern` regex. Teams using Jira-style prefixes (`[TICKET-NNNN] Verb …`) or other non-Conventional-Commit conventions can declare their shape and the compliance signal measures adherence to it. Card title is now "Commit compliance" (was "Conventional commits") since the pattern can be anything. Invalid regex warns and falls back to default.
@@ -26,7 +27,7 @@ Both lenses emit **things to look at**, not scores to rank against. The mood bad
 - 📋 **Mood-badge redesign deferred**: emoji → score-ring. UI-only, low priority.
 - ⏳ **Go port polish deferred**: parallelize `git show HEAD:<path>`, investigate 1-commit off-by-one.
 
-**Test coverage:** 135 Go unit tests + 31 Playwright e2e = **166 green, 0 failures.**
+**Test coverage:** ~150 Go unit tests + 36 Playwright e2e = green across both suites. Plank-2 Layer-B added 10 enrich-package unit tests + 4 render-package unit tests + 5 Playwright tests for the AI-read card.
 
 ---
 
@@ -101,12 +102,12 @@ This refactor is cheap (mostly moving already-structured code) and unblocks plan
 
 ## Immediate next item
 
-**Plank 1 — baseline-drift detection.** Chosen first because:
+**Plank 3 deeper exploration.** With Planks 1 + 2 (deterministic + AI) all shipped, the open thread is the read-once → explorable shift: filterable drill-downs by author/module/time inside a single rendered report, a `repopulse ask` query CLI (eventually skill-powered), and "trace" mode for a hotspot's full commit list. None of these need new data plumbing — they're read paths over the snapshot we already produce.
 
-- It uses data we already collect (git commits — no new integrations needed).
-- It delivers the "is someone struggling?" signal you explicitly asked for.
-- It proves the lens-vs-scorecard thesis before we invest in AI plumbing for plank 2.
-- The snapshot store we just built is well-suited to powering it (historical baselines).
+Adjacent open work (any of these could come first depending on what's most useful):
+
+- **Validate the enrichment in the wild.** Mode B has unit + e2e coverage but has not been run against api.anthropic.com end-to-end yet. First real run will likely turn up prompt tweaks and/or token-budget surprises.
+- **GitHub Action delivery surface** (parking-lot 2.3) — once the enrichment narrative is stable, posting it as a PR comment is the natural way to ship it to teams.
 
 ---
 

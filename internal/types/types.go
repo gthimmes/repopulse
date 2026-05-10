@@ -359,6 +359,11 @@ type MoodResult struct {
 	Signals         Signals           `json:"signals"`
 	Narrative       []NarrativeBullet `json:"narrative"`
 	RollingTimeline []RollingPoint    `json:"rollingTimeline"`
+	// Enrichment is Plank-2 Layer-B output: optional AI-added narrative
+	// bullets, standards verdicts, and per-author drift readings. Nil
+	// means the run was deterministic-only — the renderer must produce
+	// the exact same report it always has when this is absent.
+	Enrichment *EnrichmentResult `json:"enrichment,omitempty"`
 }
 
 type MoodBreakdown struct {
@@ -394,20 +399,94 @@ type RollingPoint struct {
 	BugPct  float64 `json:"bugPct"`
 }
 
+// --- Plank 2 Layer B: optional AI enrichment ---
+//
+// EnrichmentResult is everything an external "enrich" phase contributes
+// on top of the deterministic snapshot. Always optional. The renderer
+// merges it in when present and renders the deterministic report
+// unchanged when absent.
+//
+// Two delivery modes today:
+//   - Mode B (api): repopulse calls api.anthropic.com/v1/messages itself
+//     when ANTHROPIC_API_KEY is set, producing an enriched.json.
+//   - Mode C (skill): a Claude Code skill produces the file directly.
+//     No API key needed because Claude is already in the loop.
+//
+// Schema is versioned so older renderers don't blow up when the prompt
+// evolves. Bump SchemaVersion on incompatible changes.
+type EnrichmentResult struct {
+	Type          string                    `json:"type"` // always "enrichment"
+	SchemaVersion int                       `json:"schemaVersion"`
+	Source        string                    `json:"source"` // "anthropic-api" | "claude-code-skill" | "manual"
+	Model         string                    `json:"model,omitempty"`
+	GeneratedAt   string                    `json:"generatedAt"`
+	InputHash     string                    `json:"inputHash,omitempty"` // hash of deterministic input (cache key)
+	Narrative     []EnrichedNarrativeBullet `json:"narrative,omitempty"`
+	Standards     *StandardsVerdict         `json:"standards,omitempty"`
+	Drift         []DriftInterpretation     `json:"drift,omitempty"`
+	Notes         []string                  `json:"notes,omitempty"`
+}
+
+// EnrichedNarrativeBullet is a Claude-authored finding. Same shape as
+// NarrativeBullet so the renderer can merge them with the deterministic
+// list when stylistically appropriate.
+type EnrichedNarrativeBullet struct {
+	Kind string `json:"kind"` // "info" | "warn" | "alert" | "good"
+	Text string `json:"text"`
+}
+
+// StandardsVerdict is Claude's plain-English read on the deterministic
+// standards card — what the numbers mean for this team and what's worth
+// trying. Suggestions intentionally limited to a handful of items so the
+// UI doesn't degenerate into a checklist.
+type StandardsVerdict struct {
+	Headline    string   `json:"headline"`
+	Summary     string   `json:"summary"`
+	Suggestions []string `json:"suggestions,omitempty"`
+}
+
+// DriftInterpretation is per-author coaching context — anchored on
+// email so the renderer can match it back to AuthorDrift entries.
+// Reading should be coaching language, NOT performance evaluation.
+type DriftInterpretation struct {
+	Email      string `json:"email"`
+	Reading    string `json:"reading"`
+	Suggestion string `json:"suggestion,omitempty"`
+}
+
 // --- CLI options ---
 
 type CliOptions struct {
-	Window       int
-	Output       string
-	Open         bool
-	Since        string
-	Ignore       []string
-	JSON         string
-	Compare      string
-	Markdown     string
-	NoSnapshot   bool
-	GitHubToken  string // optional; falls back to GITHUB_TOKEN env var
-	GitHubRepo   string // optional owner/name override when origin URL is ambiguous
+	Window      int
+	Output      string
+	Open        bool
+	Since       string
+	Ignore      []string
+	JSON        string
+	Compare     string
+	Markdown    string
+	NoSnapshot  bool
+	GitHubToken string // optional; falls back to GITHUB_TOKEN env var
+	GitHubRepo  string // optional owner/name override when origin URL is ambiguous
+
+	// EmitJSON, when set, writes the deterministic snapshot (post-collect,
+	// pre-enrich) to this path. Useful as the input to a separate enrich
+	// phase (Mode C: a Claude Code skill).
+	EmitJSON string
+
+	// FromJSON skips collect entirely and renders from a pre-existing
+	// snapshot file. Pairs with --enriched.
+	FromJSON string
+
+	// Enriched is an enriched.json (just the AI bits) layered on top of
+	// either the live collected snapshot or the --from-json snapshot.
+	Enriched string
+
+	// Enrich (Mode B) runs the API enrichment phase after collection.
+	// Requires ANTHROPIC_API_KEY in env (or AnthropicAPIKey set).
+	Enrich         bool
+	AnthropicAPIKey string
+	EnrichModel    string // overrides the default model id
 }
 
 // --- Delta (compare) ---

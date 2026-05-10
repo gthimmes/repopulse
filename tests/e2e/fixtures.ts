@@ -19,3 +19,11 @@ export function writeFixtureReport(outputPath: string): string {
   execFileSync(FIXTURE_GEN_BIN, [abs], { stdio: 'pipe' });
   return abs;
 }
+
+// Same fixture, but with the Plank-2 Layer-B enrichment block injected so
+// the AI-read card renders. Used by the enrichment-render Playwright spec.
+export function writeEnrichedFixtureReport(outputPath: string): string {
+  const abs = resolve(outputPath);
+  execFileSync(FIXTURE_GEN_BIN, [abs, '--enriched'], { stdio: 'pipe' });
+  return abs;
+}

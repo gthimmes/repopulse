@@ -391,4 +391,33 @@ const cssTemplate = `    :root {
       .mood-label { font-size: 24px; }
       .mood-emoji { font-size: 68px; }
     }
+
+    /* Plank-2 Layer-B: AI enrichment card. Visually distinct from
+       deterministic findings so it's always obvious what is interpretation
+       (here) vs. what is measurement (the rest of the report). */
+    .enriched-card { border: 1px solid rgba(129, 140, 248, 0.35); background: linear-gradient(180deg, rgba(129, 140, 248, 0.06), rgba(17, 24, 39, 0.55)); }
+    .enriched-banner { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .enriched-tag { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.12em; color: #c7d2fe; background: rgba(129, 140, 248, 0.18); border: 1px solid rgba(129, 140, 248, 0.35); padding: 4px 10px; border-radius: 4px; }
+    .enriched-meta { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: var(--text-faint); letter-spacing: 0.06em; }
+    .enriched-card .section-sub { color: var(--text-faint); font-weight: 400; font-size: 12px; letter-spacing: normal; text-transform: none; }
+    ul.enriched-narrative { list-style: none; padding: 0; margin: 12px 0; }
+    ul.enriched-narrative li { display: flex; gap: 12px; padding: 10px 12px; border-radius: 8px; background: rgba(15, 23, 42, 0.45); margin-bottom: 6px; font-size: 14px; line-height: 1.5; }
+    ul.enriched-narrative li.alert { border-left: 3px solid var(--chaotic); }
+    ul.enriched-narrative li.warn  { border-left: 3px solid var(--anxious); }
+    ul.enriched-narrative li.good  { border-left: 3px solid var(--good); }
+    ul.enriched-narrative li.info  { border-left: 3px solid var(--accent); }
+    ul.enriched-narrative .bullet-icon { flex: 0 0 auto; }
+    .enriched-section { margin-top: 16px; padding-top: 14px; border-top: 1px dashed var(--border); }
+    .enriched-section-h { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; font-weight: 600; letter-spacing: 0.10em; text-transform: uppercase; color: var(--text-dim); margin-bottom: 8px; }
+    .enriched-sub { font-family: 'Inter', system-ui, sans-serif; font-weight: 400; font-size: 11px; color: var(--text-faint); letter-spacing: normal; text-transform: none; }
+    .enriched-headline { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+    .enriched-summary { font-size: 13px; color: var(--text-dim); line-height: 1.55; margin-bottom: 8px; }
+    ul.enriched-suggestions { padding-left: 20px; color: var(--text-dim); font-size: 13px; line-height: 1.6; }
+    ul.enriched-suggestions li { margin-bottom: 4px; }
+    ul.enriched-drift { list-style: none; padding: 0; margin: 0; }
+    ul.enriched-drift li { background: rgba(15, 23, 42, 0.45); border-radius: 8px; padding: 10px 12px; margin-bottom: 6px; }
+    .enriched-drift-name { font-weight: 600; color: var(--text); margin-bottom: 4px; }
+    .enriched-drift-reading { font-size: 13px; color: var(--text-dim); line-height: 1.5; }
+    .enriched-drift-suggestion { font-size: 12px; color: var(--accent-2); margin-top: 4px; font-style: italic; }
+    ul.enriched-notes { padding-left: 20px; color: var(--text-faint); font-size: 12px; line-height: 1.5; }
 `

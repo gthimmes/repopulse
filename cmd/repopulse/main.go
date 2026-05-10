@@ -19,6 +19,7 @@ import (
 	"repopulse/internal/codeowners"
 	"repopulse/internal/compare"
 	"repopulse/internal/config"
+	"repopulse/internal/enrich"
 	"repopulse/internal/git"
 	ghfetch "repopulse/internal/github"
 	"repopulse/internal/narrative"
@@ -39,7 +40,7 @@ func (s *stringsFlag) Set(v string) error { *s = append(*s, v); return nil }
 func main() {
 	fs := flag.NewFlagSet("repopulse", flag.ExitOnError)
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "Usage: repopulse <repo-path> [options]\n\nOptions:\n")
+		fmt.Fprintf(fs.Output(), "Usage: repopulse <repo-path> [options]\n       repopulse -from-json <snapshot.json> [-enriched <enriched.json>] [options]\n\nOptions:\n")
 		fs.PrintDefaults()
 	}
 
@@ -56,26 +57,72 @@ func main() {
 	ghToken := fs.String("github-token", "", "GitHub personal-access token for PR metrics (falls back to GITHUB_TOKEN env var)")
 	ghRepo := fs.String("github-repo", "", "Override owner/name for PR metrics when origin URL is ambiguous")
 
+	emitJSON := fs.String("emit-json", "", "Write the deterministic snapshot to this path (post-collect, pre-enrich)")
+	fromJSON := fs.String("from-json", "", "Skip collect; render from a previously-emitted snapshot file")
+	enrichedPath := fs.String("enriched", "", "Layer an enriched.json (Plank-2 Layer-B AI output) on top of the snapshot")
+	enrichFlag := fs.Bool("enrich", false, "Run AI enrichment after collect (requires ANTHROPIC_API_KEY or --anthropic-api-key)")
+	anthropicKey := fs.String("anthropic-api-key", "", "Anthropic API key for enrichment (falls back to ANTHROPIC_API_KEY env var)")
+	enrichModel := fs.String("enrich-model", "", "Override the Claude model id used for enrichment")
+
 	if len(os.Args) < 2 {
 		fs.Usage()
 		os.Exit(1)
 	}
-	if err := fs.Parse(os.Args[2:]); err != nil {
-		os.Exit(1)
+
+	// Two invocation styles:
+	//   repopulse <repo-path> [flags]                — collect + render
+	//   repopulse -from-json <snap> [flags]          — render only
+	// Flags may appear before or after the positional arg in style 1; in
+	// style 2 the snapshot path is supplied via the flag itself, no
+	// positional needed. We sniff for -from-json / --from-json before
+	// committing to a positional-arg layout.
+	args := os.Args[1:]
+	useFromJSON := false
+	for _, a := range args {
+		if a == "-from-json" || a == "--from-json" || strings.HasPrefix(a, "-from-json=") || strings.HasPrefix(a, "--from-json=") {
+			useFromJSON = true
+			break
+		}
 	}
-	repoPathRaw := os.Args[1]
+
+	repoPathRaw := ""
+	if useFromJSON {
+		if err := fs.Parse(args); err != nil {
+			os.Exit(1)
+		}
+	} else {
+		if err := fs.Parse(os.Args[2:]); err != nil {
+			os.Exit(1)
+		}
+		repoPathRaw = os.Args[1]
+	}
+
 	opts := types.CliOptions{
-		Window:     *window,
-		Output:     *output,
-		Open:       *open,
-		Since:      *since,
-		Ignore:     []string(ignorePats),
-		JSON:       *jsonOut,
-		Compare:    *cmpPath,
-		Markdown:   *markdownOut,
-		NoSnapshot:  *noSnapshot,
-		GitHubToken: firstNonEmpty(*ghToken, os.Getenv("GITHUB_TOKEN")),
-		GitHubRepo:  *ghRepo,
+		Window:          *window,
+		Output:          *output,
+		Open:            *open,
+		Since:           *since,
+		Ignore:          []string(ignorePats),
+		JSON:            *jsonOut,
+		Compare:         *cmpPath,
+		Markdown:        *markdownOut,
+		NoSnapshot:      *noSnapshot,
+		GitHubToken:     firstNonEmpty(*ghToken, os.Getenv("GITHUB_TOKEN")),
+		GitHubRepo:      *ghRepo,
+		EmitJSON:        *emitJSON,
+		FromJSON:        *fromJSON,
+		Enriched:        *enrichedPath,
+		Enrich:          *enrichFlag,
+		AnthropicAPIKey: firstNonEmpty(*anthropicKey, os.Getenv("ANTHROPIC_API_KEY")),
+		EnrichModel:     *enrichModel,
+	}
+
+	if useFromJSON {
+		if err := runFromJSON(opts); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		return
 	}
 
 	if err := run(repoPathRaw, opts); err != nil {
@@ -84,12 +131,133 @@ func main() {
 	}
 }
 
+// run is the standard collect → optional enrich → render pipeline.
+// runFromJSON below covers the "render only" case where the deterministic
+// snapshot already exists on disk.
 func run(repoPathRaw string, opts types.CliOptions) error {
 	repoPath, err := filepath.Abs(repoPathRaw)
 	if err != nil {
 		return err
 	}
 
+	snap, meta, commits, err := collectSnapshot(repoPath, opts)
+	if err != nil {
+		return err
+	}
+
+	// Optional: emit the deterministic snapshot before enrichment so a
+	// downstream skill can read it, analyze, and produce enriched.json.
+	if opts.EmitJSON != "" {
+		if err := writeSnapshot(opts.EmitJSON, snap, meta); err != nil {
+			return err
+		}
+	}
+
+	// Mode B — API enrichment. Failures only warn; the deterministic
+	// report still renders.
+	if opts.Enrich {
+		if opts.AnthropicAPIKey == "" {
+			fmt.Fprintln(os.Stderr, "Warning: --enrich requested but no API key found (set ANTHROPIC_API_KEY or pass --anthropic-api-key); continuing without enrichment")
+		} else {
+			fmt.Fprintln(os.Stderr, "Enriching snapshot via Anthropic API…")
+			ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+			er, err := enrich.Run(ctx, snap, meta, enrich.Options{
+				APIKey:   opts.AnthropicAPIKey,
+				Model:    opts.EnrichModel,
+				CacheDir: filepath.Join(repoPath, enrich.CacheDir),
+			})
+			cancel()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: enrichment failed: %v\n", err)
+			} else {
+				snap.Enrichment = er
+			}
+		}
+	}
+
+	// Mode C — explicit enrichment file overrides API output. Lets a
+	// skill produce enriched.json by hand and feed it back in.
+	if opts.Enriched != "" {
+		er, err := enrich.LoadFromFile(opts.Enriched)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to load --enriched file: %v\n", err)
+		} else {
+			snap.Enrichment = er
+		}
+	}
+
+	return finishAndRender(repoPath, snap, meta, commits, opts)
+}
+
+// runFromJSON handles --from-json: skip collect, load the snapshot,
+// optionally layer --enriched on top, then render.
+func runFromJSON(opts types.CliOptions) error {
+	if opts.FromJSON == "" {
+		return fmt.Errorf("--from-json path is empty")
+	}
+	loaded, err := compare.LoadSnapshot(opts.FromJSON)
+	if err != nil {
+		return fmt.Errorf("load --from-json: %w", err)
+	}
+	mood := loaded.MoodResult
+	meta := types.RepoMeta{
+		RepoName:        loaded.RepoName,
+		AnalyzedCommits: loaded.AnalyzedCommits,
+		WindowDays:      loaded.WindowDays,
+	}
+	if t, err := time.Parse(time.RFC3339Nano, loaded.GeneratedAt); err == nil {
+		meta.GeneratedAt = t
+		meta.WindowEnd = t
+		meta.WindowStart = t.AddDate(0, 0, -loaded.WindowDays)
+	} else {
+		meta.GeneratedAt = time.Now()
+		meta.WindowEnd = meta.GeneratedAt
+		meta.WindowStart = meta.GeneratedAt.AddDate(0, 0, -loaded.WindowDays)
+	}
+	meta.HasLimitedHistory = loaded.AnalyzedCommits < 10
+
+	if opts.Enriched != "" {
+		er, err := enrich.LoadFromFile(opts.Enriched)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to load --enriched file: %v\n", err)
+		} else {
+			mood.Enrichment = er
+		}
+	}
+
+	// No persistent snapshot store and no compare semantics in this
+	// path — those depend on knowing the live repo, which we don't have.
+	html := render.RenderHTML(mood, meta, nil, nil)
+	outputPath, err := filepath.Abs(opts.Output)
+	if err != nil {
+		return err
+	}
+	if err := writeFileMkdir(outputPath, []byte(html)); err != nil {
+		return err
+	}
+	if opts.Markdown != "" {
+		md := render.RenderMarkdown(mood, meta, nil, render.MarkdownOptions{HTMLReportPath: outputPath})
+		mdPath, _ := filepath.Abs(opts.Markdown)
+		if err := writeFileMkdir(mdPath, []byte(md)); err != nil {
+			return err
+		}
+		fmt.Printf("  Markdown digest:   %s\n", mdPath)
+	}
+	fmt.Printf("\n✓ Rendered from %s\n", opts.FromJSON)
+	fmt.Printf("  HTML report:       %s\n", outputPath)
+	if mood.Enrichment != nil {
+		fmt.Printf("  Enrichment:        %s (%s)\n", mood.Enrichment.Source, mood.Enrichment.Model)
+	}
+	if opts.Open {
+		openInBrowser(outputPath)
+	}
+	return nil
+}
+
+// collectSnapshot does the deterministic collection-and-scoring pipeline.
+// Pulled out of run() so the same code can power -emit-json and the
+// API-enrichment phase without having to also do all the rendering work.
+func collectSnapshot(repoPath string, opts types.CliOptions) (types.MoodResult, types.RepoMeta, []types.CommitRecord, error) {
 	cfg := config.LoadConfig(repoPath)
 	isExcluded := config.BuildIgnorePredicate(cfg, opts.Ignore)
 	bugKW := config.ResolvedBugKeywords(cfg)
@@ -105,13 +273,12 @@ func run(repoPathRaw string, opts types.CliOptions) error {
 		Since:      opts.Since,
 	})
 	if err != nil {
-		return err
+		return types.MoodResult{}, types.RepoMeta{}, nil, err
 	}
 	if len(commits) == 0 {
-		return fmt.Errorf("repository has no commits in the analysis window")
+		return types.MoodResult{}, types.RepoMeta{}, nil, fmt.Errorf("repository has no commits in the analysis window")
 	}
 
-	// Clip window to oldest commit date
 	windowEnd := time.Now()
 	oldest := commits[0].Date
 	for _, c := range commits {
@@ -126,7 +293,6 @@ func run(repoPathRaw string, opts types.CliOptions) error {
 	}
 	effectiveWindowDays := int(math.Max(1, math.Ceil(windowEnd.Sub(windowStart).Hours()/24)))
 
-	// Signals
 	freq := signals.ComputeFrequency(commits, effectiveWindowDays)
 	churn := signals.ComputeChurn(commits, signals.ChurnOptions{
 		IsExcluded:   isExcluded,
@@ -161,9 +327,6 @@ func run(repoPathRaw string, opts types.CliOptions) error {
 	})
 	rolling := narrative.ComputeRollingTimeline(commits, windowStart, windowEnd, bugOpts)
 
-	// Plank 1 — per-author baseline drift. Pull a baseline window
-	// 6× the current window, ending where the current window starts,
-	// so each contributor is compared against their own prior pattern.
 	baselineDays := effectiveWindowDays * 6
 	baselineSince := windowStart.AddDate(0, 0, -baselineDays).UTC().Format(time.RFC3339)
 	baselineUntil := windowStart.UTC().Format(time.RFC3339)
@@ -181,18 +344,11 @@ func run(repoPathRaw string, opts types.CliOptions) error {
 		BugOptions:   bugOpts,
 	})
 
-	// Plank 2 — deterministic standards. Conventional-commit compliance
-	// is computed over the current window's commits; test density over
-	// the full HEAD file set so the result reflects the whole repo,
-	// not just files changed in the window.
 	allFiles, err := git.ListFiles(repoPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not list files for test-density analysis: %v\n", err)
 	}
 	commitPattern, commitPatternSource, commitPatternCustom := config.ResolvedCommitPattern(cfg)
-	// Only pass the pattern string to the renderer when it's custom;
-	// the default-case UI reads "Conventional Commits" rather than
-	// showing the regex itself.
 	sourceForUI := ""
 	if commitPatternCustom {
 		sourceForUI = commitPatternSource
@@ -202,9 +358,6 @@ func run(repoPathRaw string, opts types.CliOptions) error {
 		CommitPatternSource: sourceForUI,
 	})
 
-	// Phase 3.1 — PR flow. Gated on a GitHub token being available.
-	// No token → no PR section (the report still works for offline
-	// analysis). Rate-limit hits fall back to cached PRs + banner.
 	prFlow := computePRFlow(repoPath, opts, effectiveWindowDays, windowStart)
 
 	base := scorer.ComputeMood(scorer.Input{
@@ -222,6 +375,7 @@ func run(repoPathRaw string, opts types.CliOptions) error {
 	if prFlow != nil {
 		base.Signals.PRFlow = prFlow
 	}
+
 	meta := types.RepoMeta{
 		RepoName:          filepath.Base(repoPath),
 		RepoPath:          repoPath,
@@ -235,8 +389,12 @@ func run(repoPathRaw string, opts types.CliOptions) error {
 	narr := narrative.Generate(base, meta)
 	mood := base
 	mood.Narrative = narr
+	return mood, meta, commits, nil
+}
 
-	// Delta
+// finishAndRender does the post-collect work that's identical regardless
+// of whether enrichment ran: snapshot store, compare, render, summary.
+func finishAndRender(repoPath string, mood types.MoodResult, meta types.RepoMeta, commits []types.CommitRecord, opts types.CliOptions) error {
 	var delta *types.MoodDelta
 	if opts.Compare != "" {
 		prev, err := compare.LoadSnapshot(opts.Compare)
@@ -248,8 +406,6 @@ func run(repoPathRaw string, opts types.CliOptions) error {
 		}
 	}
 
-	// Persistent snapshot store: write current run, then load the full
-	// history so the trend chart includes every prior point.
 	currentSnap := compare.ReportSnapshot{
 		GeneratedAt:     meta.GeneratedAt.UTC().Format(time.RFC3339Nano),
 		RepoName:        meta.RepoName,
@@ -274,7 +430,6 @@ func run(repoPathRaw string, opts types.CliOptions) error {
 		}
 	}
 
-	// HTML
 	html := render.RenderHTML(mood, meta, delta, trendSnaps)
 	outputPath, err := filepath.Abs(opts.Output)
 	if err != nil {
@@ -284,7 +439,6 @@ func run(repoPathRaw string, opts types.CliOptions) error {
 		return err
 	}
 
-	// Optional JSON (explicit path; independent of the persistent store)
 	if opts.JSON != "" {
 		data, _ := json.MarshalIndent(currentSnap, "", "  ")
 		jsonPath, _ := filepath.Abs(opts.JSON)
@@ -294,7 +448,6 @@ func run(repoPathRaw string, opts types.CliOptions) error {
 		fmt.Printf("  JSON snapshot:     %s\n", jsonPath)
 	}
 
-	// Optional markdown
 	if opts.Markdown != "" {
 		md := render.RenderMarkdown(mood, meta, delta, render.MarkdownOptions{
 			HTMLReportPath: outputPath,
@@ -306,21 +459,23 @@ func run(repoPathRaw string, opts types.CliOptions) error {
 		fmt.Printf("  Markdown digest:   %s\n", mdPath)
 	}
 
-	// Summary
 	moodLabel := strings.ToUpper(string(mood.Mood)[:1]) + string(mood.Mood)[1:]
 	emoji := render.MoodEmoji(string(mood.Mood))
-	fmt.Printf("\n\u2713 Analyzed %d commits over %d days\n", len(commits), effectiveWindowDays)
+	fmt.Printf("\n✓ Analyzed %d commits over %d days\n", len(commits), meta.WindowDays)
 	fmt.Printf("  Mood: %s %s (score: %d/100)\n", moodLabel, emoji, mood.CompositeScore)
 	if delta != nil {
 		sign := ""
 		if delta.Composite >= 0 {
 			sign = "+"
 		}
-		fmt.Printf("  \u0394 vs previous:   %s%d\n", sign, delta.Composite)
+		fmt.Printf("  Δ vs previous:   %s%d\n", sign, delta.Composite)
 	}
 	fmt.Printf("  HTML report:       %s\n", outputPath)
 	if snapPath != "" {
 		fmt.Printf("  Snapshot stored:   %s (%d total)\n", snapPath, len(trendSnaps))
+	}
+	if mood.Enrichment != nil {
+		fmt.Printf("  AI enrichment:     %s (%s)\n", mood.Enrichment.Source, mood.Enrichment.Model)
 	}
 	if len(mood.Signals.Modules.Modules) > 0 {
 		top := mood.Signals.Modules.Modules
@@ -338,6 +493,32 @@ func run(repoPathRaw string, opts types.CliOptions) error {
 	if opts.Open {
 		openInBrowser(outputPath)
 	}
+	return nil
+}
+
+// writeSnapshot writes the deterministic snapshot in the same format
+// the persistent snapshot store uses, so --emit-json output and
+// .repopulse/snapshots/*.json are interchangeable.
+func writeSnapshot(path string, mood types.MoodResult, meta types.RepoMeta) error {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	snap := compare.ReportSnapshot{
+		GeneratedAt:     meta.GeneratedAt.UTC().Format(time.RFC3339Nano),
+		RepoName:        meta.RepoName,
+		WindowDays:      meta.WindowDays,
+		AnalyzedCommits: meta.AnalyzedCommits,
+		MoodResult:      mood,
+	}
+	data, err := json.MarshalIndent(snap, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := writeFileMkdir(abs, data); err != nil {
+		return err
+	}
+	fmt.Printf("  Deterministic JSON: %s\n", abs)
 	return nil
 }
 
@@ -375,7 +556,7 @@ func firstNonEmpty(a, b string) string {
 // fetch fails irrecoverably.
 func computePRFlow(repoPath string, opts types.CliOptions, windowDays int, windowStart time.Time) *types.PRFlowSignal {
 	if opts.GitHubToken == "" && opts.GitHubRepo == "" {
-		return nil // offline / no-token mode; silently skip
+		return nil
 	}
 
 	var ownerRepo ghfetch.OwnerRepo

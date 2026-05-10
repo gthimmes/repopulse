@@ -53,6 +53,7 @@ func RenderMarkdown(data types.MoodResult, meta types.RepoMeta, delta *types.Moo
 		header,
 		scoreLine,
 		renderFindingsMD(data.Narrative),
+		renderEnrichmentMD(data),
 		renderHotspotsTableMD(data.Signals.Hotspots.Hotspots, topHotspots),
 		renderModulesMD(data.Signals.Modules.Modules),
 		renderTopRecommendationsMD(data.Signals.Hotspots.Hotspots, topRecs),
@@ -181,6 +182,79 @@ func renderTopRecommendationsMD(hotspots []types.HotspotEntry, cap int) string {
 		}
 		fmt.Fprintf(&sb, "- %s **%s** \u00B7 `%s`\n  %s\n", icon, r.rec.Kind, r.path, r.rec.Text)
 	}
+	return sb.String()
+}
+
+// renderEnrichmentMD adds the AI-read section to the markdown digest
+// when enrichment is present. Marked clearly as AI-generated so the
+// digest reader knows what's interpretation vs. measurement.
+func renderEnrichmentMD(data types.MoodResult) string {
+	er := data.Enrichment
+	if er == nil {
+		return ""
+	}
+	model := er.Model
+	if model == "" {
+		model = "language model"
+	}
+	source := er.Source
+	if source == "" {
+		source = "ai"
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("### AI read &mdash; _%s &middot; %s_\n\n", source, model))
+	sb.WriteString("> Interpretation only; the deterministic numbers above are the source of truth.\n")
+
+	if len(er.Narrative) > 0 {
+		sb.WriteString("\n")
+		for _, b := range er.Narrative {
+			icon := kindIcon[b.Kind]
+			if icon == "" {
+				icon = "•"
+			}
+			fmt.Fprintf(&sb, "- %s %s\n", icon, b.Text)
+		}
+	}
+
+	if er.Standards != nil {
+		sb.WriteString("\n**Standards:** ")
+		if er.Standards.Headline != "" {
+			fmt.Fprintf(&sb, "%s\n\n", er.Standards.Headline)
+		} else {
+			sb.WriteString("\n\n")
+		}
+		if er.Standards.Summary != "" {
+			fmt.Fprintf(&sb, "%s\n", er.Standards.Summary)
+		}
+		if len(er.Standards.Suggestions) > 0 {
+			sb.WriteString("\n")
+			for _, s := range er.Standards.Suggestions {
+				fmt.Fprintf(&sb, "- %s\n", s)
+			}
+		}
+	}
+
+	if len(er.Drift) > 0 {
+		// Email → name lookup so the digest shows names, not emails.
+		nameByEmail := map[string]string{}
+		for _, c := range data.Signals.Authors.Contributors {
+			nameByEmail[strings.ToLower(c.Email)] = c.Name
+		}
+		sb.WriteString("\n**Per-contributor reading** (coaching context, not evaluation):\n\n")
+		for _, d := range er.Drift {
+			name := nameByEmail[strings.ToLower(d.Email)]
+			if name == "" {
+				name = d.Email
+			}
+			fmt.Fprintf(&sb, "- **%s** &mdash; %s", name, d.Reading)
+			if d.Suggestion != "" {
+				fmt.Fprintf(&sb, " _(%s)_", d.Suggestion)
+			}
+			sb.WriteString("\n")
+		}
+	}
+
 	return sb.String()
 }
 

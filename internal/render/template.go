@@ -125,6 +125,9 @@ func RenderHTML(data types.MoodResult, meta types.RepoMeta, delta *types.MoodDel
       %s
     </div>
 
+    <!-- Optional AI enrichment (Plank 2 Layer B) -->
+    %s
+
     <!-- Trends across snapshots -->
     %s
 
@@ -252,6 +255,7 @@ func RenderHTML(data types.MoodResult, meta types.RepoMeta, delta *types.MoodDel
 		formatDateShort2(meta.WindowStart), formatDateShort2(meta.WindowEnd),
 		meta.AnalyzedCommits,
 		narrativeHTML,
+		renderEnrichment(data),
 		trendSectionHTML,
 		standardsHTML,
 		prFlowHTML,
@@ -1278,4 +1282,129 @@ func max1(n int) int {
 		return 1
 	}
 	return n
+}
+
+// renderEnrichment is the Plank-2 Layer-B AI-read card. Rendered only
+// when data.Enrichment is non-nil. The deterministic report renders
+// identically without it. Visually distinguished from the deterministic
+// findings so a reader can always tell what came from numbers vs. what
+// came from a language model.
+func renderEnrichment(data types.MoodResult) string {
+	er := data.Enrichment
+	if er == nil {
+		return ""
+	}
+
+	// Build narrative bullets if present. Reuse the same kind→icon
+	// scheme as the deterministic findings so the visual language stays
+	// consistent.
+	iconFor := func(k string) string {
+		switch k {
+		case "alert":
+			return "\U0001F525"
+		case "warn":
+			return "⚠️"
+		case "good":
+			return "✅"
+		default:
+			return "ℹ️"
+		}
+	}
+
+	var narrativeHTML string
+	if len(er.Narrative) > 0 {
+		var sb strings.Builder
+		sb.WriteString(`<ul class="enriched-narrative">`)
+		for _, b := range er.Narrative {
+			fmt.Fprintf(&sb, `<li class="%s"><span class="bullet-icon">%s</span><span>%s</span></li>`,
+				escapeHTML(b.Kind), iconFor(b.Kind), escapeHTML(b.Text))
+		}
+		sb.WriteString(`</ul>`)
+		narrativeHTML = sb.String()
+	}
+
+	var standardsHTML string
+	if er.Standards != nil {
+		var sb strings.Builder
+		sb.WriteString(`<div class="enriched-section"><div class="enriched-section-h">Standards</div>`)
+		if er.Standards.Headline != "" {
+			fmt.Fprintf(&sb, `<div class="enriched-headline">%s</div>`, escapeHTML(er.Standards.Headline))
+		}
+		if er.Standards.Summary != "" {
+			fmt.Fprintf(&sb, `<div class="enriched-summary">%s</div>`, escapeHTML(er.Standards.Summary))
+		}
+		if len(er.Standards.Suggestions) > 0 {
+			sb.WriteString(`<ul class="enriched-suggestions">`)
+			for _, s := range er.Standards.Suggestions {
+				fmt.Fprintf(&sb, `<li>%s</li>`, escapeHTML(s))
+			}
+			sb.WriteString(`</ul>`)
+		}
+		sb.WriteString(`</div>`)
+		standardsHTML = sb.String()
+	}
+
+	var driftHTML string
+	if len(er.Drift) > 0 {
+		// Look up display names for the emails so the reader gets a name,
+		// not a raw email string.
+		nameByEmail := map[string]string{}
+		for _, c := range data.Signals.Authors.Contributors {
+			nameByEmail[strings.ToLower(c.Email)] = c.Name
+		}
+		var sb strings.Builder
+		sb.WriteString(`<div class="enriched-section"><div class="enriched-section-h">Per-contributor reading <span class="enriched-sub">&middot; coaching context, not evaluation</span></div><ul class="enriched-drift">`)
+		for _, d := range er.Drift {
+			name := nameByEmail[strings.ToLower(d.Email)]
+			if name == "" {
+				name = d.Email
+			}
+			fmt.Fprintf(&sb, `<li><div class="enriched-drift-name">%s</div><div class="enriched-drift-reading">%s</div>`,
+				escapeHTML(name), escapeHTML(d.Reading))
+			if d.Suggestion != "" {
+				fmt.Fprintf(&sb, `<div class="enriched-drift-suggestion">&rarr; %s</div>`, escapeHTML(d.Suggestion))
+			}
+			sb.WriteString(`</li>`)
+		}
+		sb.WriteString(`</ul></div>`)
+		driftHTML = sb.String()
+	}
+
+	if narrativeHTML == "" && standardsHTML == "" && driftHTML == "" {
+		return ""
+	}
+
+	model := er.Model
+	if model == "" {
+		model = "language model"
+	}
+	source := er.Source
+	if source == "" {
+		source = "ai"
+	}
+
+	notesHTML := ""
+	if len(er.Notes) > 0 {
+		var sb strings.Builder
+		sb.WriteString(`<div class="enriched-section"><div class="enriched-section-h">Notes</div><ul class="enriched-notes">`)
+		for _, n := range er.Notes {
+			fmt.Fprintf(&sb, `<li>%s</li>`, escapeHTML(n))
+		}
+		sb.WriteString(`</ul></div>`)
+		notesHTML = sb.String()
+	}
+
+	return fmt.Sprintf(`<div class="card enriched-card" style="margin-bottom:24px">
+      <div class="enriched-banner">
+        <span class="enriched-tag">AI-GENERATED</span>
+        <span class="enriched-meta">%s &middot; %s</span>
+      </div>
+      <h2>AI read <span class="section-sub">&middot; interpretation only, deterministic numbers above are the source of truth</span></h2>
+      %s
+      %s
+      %s
+      %s
+    </div>`,
+		escapeHTML(source), escapeHTML(model),
+		narrativeHTML, standardsHTML, driftHTML, notesHTML)
 }
